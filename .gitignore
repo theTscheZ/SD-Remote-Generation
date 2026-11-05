@@ -6,6 +6,10 @@
 local.properties
 *.jks
 *.keystore
+*.p12
+*.pfx
+keystore.properties
+signing.properties
 *.apk
 *.aab
 .DS_Store
