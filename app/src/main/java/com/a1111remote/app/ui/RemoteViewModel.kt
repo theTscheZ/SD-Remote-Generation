@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.compose.runtime.getValue
@@ -16,6 +17,8 @@ import com.a1111remote.app.data.SecureStore
 import com.a1111remote.app.data.ServerOptions
 import com.a1111remote.app.model.ConnectionSettings
 import com.a1111remote.app.model.GenerationSettings
+import com.a1111remote.app.model.GenerationMode
+import com.a1111remote.app.model.ExtrasSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,6 +27,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.text.DateFormat
 import java.util.Date
@@ -34,6 +38,9 @@ data class LocalImage(val file: File, val preview: Bitmap, val label: String)
 data class UiState(
     val connection: ConnectionSettings = ConnectionSettings(),
     val settings: GenerationSettings = GenerationSettings(),
+    val mode: GenerationMode = GenerationMode.TXT2IMG,
+    val extras: ExtrasSettings = ExtrasSettings(),
+    val sourcePreview: Bitmap? = null,
     val connectedUrl: String = "",
     val options: ServerOptions? = null,
     val isConnecting: Boolean = false,
@@ -54,13 +61,15 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private val store = SecureStore(application)
     private val api = A1111Api()
     var state by androidx.compose.runtime.mutableStateOf(
-        UiState(connection = store.connection(), settings = store.generation())
+        UiState(connection = store.connection(), settings = store.generation(store.mode()),
+            mode = store.mode(), extras = store.extras())
     )
         private set
 
     private var progressJob: Job? = null
     private var generationJob: Job? = null
     private val loadingThumbs = mutableSetOf<String>()
+    private var sourceBytes: ByteArray? = null
 
     init { refreshGallery() }
 
@@ -73,7 +82,63 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun editSettings(transform: (GenerationSettings) -> GenerationSettings) {
         val updated = transform(state.settings)
         state = state.copy(settings = updated)
-        store.saveGeneration(updated)
+        store.saveGeneration(updated, state.mode)
+    }
+
+    fun selectMode(mode: GenerationMode) {
+        if (state.isGenerating || state.mode == mode) return
+        store.saveMode(mode)
+        state = state.copy(mode = mode,
+            settings = store.generation(mode),
+            generated = emptyList(), preview = null, progress = 0f)
+    }
+
+    fun editExtras(transform: (ExtrasSettings) -> ExtrasSettings) {
+        val updated = transform(state.extras)
+        state = state.copy(extras = updated)
+        store.saveExtras(updated)
+    }
+
+    fun pickSourceImage(uri: Uri?) {
+        if (uri == null) return
+        viewModelScope.launch {
+            try {
+                val selected = withContext(Dispatchers.IO) {
+                    val resolver = getApplication<Application>().contentResolver
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                    val maxSide = maxOf(bounds.outWidth, bounds.outHeight)
+                    if (maxSide <= 0) throw IOException("Das gewählte Bild konnte nicht gelesen werden.")
+                    var sample = 1
+                    while (maxSide / sample > 2048) sample *= 2
+                    val bitmap = resolver.openInputStream(uri)?.use {
+                        BitmapFactory.decodeStream(it, null,
+                            BitmapFactory.Options().apply { inSampleSize = sample })
+                    } ?: throw IOException("Bild konnte nicht dekodiert werden.")
+                    val out = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    Pair(bitmap, out.toByteArray())
+                }
+                sourceBytes = selected.second
+                state = state.copy(sourcePreview = selected.first, message = "Ausgangsbild geladen.")
+            } catch (error: Exception) {
+                state = state.copy(message = "Bildauswahl fehlgeschlagen: ${error.message}")
+            }
+        }
+    }
+
+    fun usePcImageAsSource(image: PcImage) {
+        if (!state.bridgeAvailable) return
+        viewModelScope.launch {
+            try {
+                val bytes = api.pcImageDownload(state.connectedUrl, state.connection, image.id)
+                val decoded = decodeBitmap(bytes) ?: throw IOException("Bild konnte nicht gelesen werden.")
+                sourceBytes = bytes
+                state = state.copy(sourcePreview = decoded, message = "PC-Bild als Ausgangsbild gewählt.")
+            } catch (error: Exception) {
+                state = state.copy(message = "PC-Bild konnte nicht geladen werden: ${error.message}")
+            }
+        }
     }
 
     fun connect() {
@@ -109,14 +174,21 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             state = state.copy(message = "Zuerst unter Verbindung den PC verbinden.")
             return
         }
+        if (state.mode != GenerationMode.TXT2IMG && sourceBytes == null) {
+            state = state.copy(message = "Zuerst ein Ausgangsbild auswählen.")
+            return
+        }
         generationJob = viewModelScope.launch {
+            val mode = state.mode
+            val source = sourceBytes
+            val extras = state.extras
             val url = state.connectedUrl
             val credentials = state.connection
             val settings = state.settings
             state = state.copy(isGenerating = true, generated = emptyList(), preview = null,
                 progress = 0f, message = "Generierung läuft …")
             progressJob?.cancel()
-            progressJob = launch {
+            if (mode != GenerationMode.EXTRAS) progressJob = launch {
                 var poll = 0
                 while (isActive) {
                     delay(1250)
@@ -129,7 +201,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             try {
-                val images = api.generate(url, credentials, settings)
+                val images = api.generate(url, credentials, settings, mode, source, extras)
                 withContext(Dispatchers.IO) { saveLocal(images) }
                 state = state.copy(generated = images.mapNotNull(::decodeBitmap), progress = 1f,
                     message = "${images.size} Bild(er) fertig und lokal gespeichert.")
@@ -171,6 +243,32 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
 
     /** Tapping an already-selected LoRA removes its complete tag from the prompt. */
+    fun updateAdetailer(index: Int, update: (com.a1111remote.app.model.AdetailerSettings) -> com.a1111remote.app.model.AdetailerSettings) {
+        editSettings { old ->
+            if (index == 0) old.copy(adetailer = update(old.adetailer))
+            else {
+                val extras = old.additionalAdetailers.toMutableList()
+                if (index - 1 in extras.indices) extras[index - 1] = update(extras[index - 1])
+                old.copy(additionalAdetailers = extras)
+            }
+        }
+    }
+
+    fun addAdetailerTab() {
+        editSettings { old ->
+            if (old.additionalAdetailers.size >= 4) old
+            else old.copy(additionalAdetailers = old.additionalAdetailers +
+                com.a1111remote.app.model.AdetailerSettings(model = "hand_yolov8n.pt"))
+        }
+    }
+
+    fun removeAdetailerTab(index: Int) {
+        if (index <= 0) return
+        editSettings { old ->
+            old.copy(additionalAdetailers = old.additionalAdetailers.filterIndexed { pos, _ -> pos != index - 1 })
+        }
+    }
+
     fun toggleLora(name: String, weight: String = "1.0") {
         val tag = Regex("<lora:([^:>]+):([^>]+)>", RegexOption.IGNORE_CASE)
         val selected = tag.findAll(state.settings.prompt).any { it.groupValues[1].equals(name, ignoreCase = true) }
@@ -195,7 +293,20 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             state = state.copy(isRestoring = true)
             try {
-                val data = api.lastPcParameters(state.connectedUrl, state.connection)
+                val data = api.lastPcParameters(state.connectedUrl, state.connection, state.mode)
+                if (state.mode == GenerationMode.EXTRAS) {
+                    editExtras {
+                        it.copy(
+                            upscaler = data.optString("upscaler", it.upscaler),
+                            scale = data.optDouble("scale", it.scale.toDouble()).toFloat(),
+                            gfpgan = data.optDouble("gfpgan", it.gfpgan.toDouble()).toFloat(),
+                            codeformer = data.optDouble("codeformer", it.codeformer.toDouble()).toFloat(),
+                            codeformerWeight = data.optDouble("codeformer_weight", it.codeformerWeight.toDouble()).toFloat()
+                        )
+                    }
+                    state = state.copy(message = "Extras-Parameter vom PC übernommen.")
+                    return@launch
+                }
                 val old = state.settings
                 val checkpoints = state.options?.checkpoints.orEmpty()
                 val model = data.optString("model")
@@ -217,7 +328,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     checkpoint = checkpoint,
                     hiresEnabled = data.optBoolean("hires_enabled", old.hiresEnabled),
                     hiresScale = data.optDouble("hires_scale", old.hiresScale.toDouble()).toFloat(),
-                    hiresDenoising = data.optDouble("hires_denoising", old.hiresDenoising.toDouble()).toFloat()
+                    hiresDenoising = data.optDouble("hires_denoising", old.hiresDenoising.toDouble()).toFloat(),
+                    img2imgDenoising = data.optDouble("img2img_denoising", old.img2imgDenoising.toDouble()).toFloat()
                 )
                 editSettings { updated }
                 state = state.copy(message = "Letzte Generierungsparameter vom PC übernommen.")
