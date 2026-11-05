@@ -4,6 +4,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ModelsTest {
+    @Test fun `batch count and size use different API keys`() {
+        val settings = GenerationSettings(batchCount = 4, batchSize = 2)
+        val json = settings.toPayload()
+        assertEquals(4, json.getInt("n_iter"))
+        assertEquals(2, json.getInt("batch_size"))
+        assertEquals(8, settings.batchCount * settings.batchSize)
+        assertEquals(settings, GenerationSettings.fromJson(settings.toJson()))
+    }
+
+    @Test fun `older saved settings default to one batch count`() {
+        val json = org.json.JSONObject().put("batchSize", 3)
+        val recovered = GenerationSettings.fromJson(json)
+        assertEquals(1, recovered.batchCount)
+        assertEquals(3, recovered.batchSize)
+    }
+
     @Test fun `txt2img payload with adetailer`() {
         val settings = GenerationSettings(prompt="test", checkpoint="my-model", adetailer=AdetailerSettings(enabled=true))
         val json = settings.toPayload()
