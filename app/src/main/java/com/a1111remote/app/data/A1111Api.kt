@@ -31,7 +31,7 @@ data class ServerOptions(
     val upscalers: List<String> = emptyList()
 )
 
-data class Progress(val fraction: Float, val currentImage: ByteArray?)
+data class Progress(val fraction: Float, val currentImage: ByteArray?, val remoteActive: Boolean)
 data class PcImage(val id: String, val name: String, val modified: Long)
 
 /** Requests are scoped to one explicitly configured private endpoint. */
@@ -184,7 +184,8 @@ class A1111Api {
         val result = request(baseUrl, auth, "/sdapi/v1/progress?skip_current_image=${!withImage}")
         val encoded = result.optString("current_image")
         Progress(result.optDouble("progress", 0.0).toFloat().coerceIn(0f, 1f),
-            if (withImage && encoded.isNotEmpty()) runCatching { decodeImage(encoded) }.getOrNull() else null)
+            if (withImage && encoded.isNotEmpty()) runCatching { decodeImage(encoded) }.getOrNull() else null,
+            result.optJSONObject("state")?.optString("job").orEmpty().isNotBlank())
     }
 
     suspend fun interrupt(baseUrl: String, auth: ConnectionSettings) = withContext(Dispatchers.IO) {
