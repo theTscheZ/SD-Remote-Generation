@@ -2,6 +2,8 @@ package com.a1111remote.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -38,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.a1111remote.app.model.AdetailerSettings
 import com.a1111remote.app.model.GenerationSettings
+import com.a1111remote.app.model.GenerationMode
 import com.a1111remote.app.data.PcImage
 import com.a1111remote.app.ui.LocalImage
 import com.a1111remote.app.ui.RemoteViewModel
@@ -105,8 +108,46 @@ private fun RemoteApp(vm: RemoteViewModel) {
 @Composable
 private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection: () -> Unit) {
     val current = state.settings
+    val mode = state.mode
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        vm.pickSourceImage(uri)
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Spacer(Modifier.height(2.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(
+                GenerationMode.TXT2IMG to "txt2img",
+                GenerationMode.IMG2IMG to "img2img",
+                GenerationMode.EXTRAS to "Extras"
+            ).forEach { (option, label) ->
+                FilterChip(
+                    selected = mode == option,
+                    onClick = { vm.selectMode(option) },
+                    label = { Text(label) },
+                    enabled = !state.isGenerating,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        if (mode != GenerationMode.TXT2IMG) {
+            SectionCard("Ausgangsbild") {
+                OutlinedButton(onClick = { imagePicker.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth()) {
+                    Text("Bild vom Handy auswählen")
+                }
+                state.sourcePreview?.let { bitmap ->
+                    Image(bitmap.asImageBitmap(), "Ausgangsbild",
+                        Modifier.fillMaxWidth().heightIn(max = 260.dp),
+                        contentScale = ContentScale.Fit)
+                }
+                if (state.sourcePreview == null) {
+                    Text("Wähle ein Bild aus. Alternativ kannst du ein PC-Bild in der PC-Galerie als Quelle auswählen.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary)
+                }
+            }
+        }
+
         OutlinedButton(
             onClick = vm::restorePcParameters,
             enabled = state.bridgeAvailable && !state.isRestoring,
@@ -124,43 +165,93 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
                 Text("Noch nicht verbunden · PC-Verbindung einrichten", Modifier.padding(14.dp), color = accent)
             }
         }
-        OutlinedTextField(value = current.prompt, onValueChange = { text -> vm.editSettings { it.copy(prompt = text) } }, label = { Text("Prompt") },
-            minLines = 3, maxLines = 8, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(value = current.negativePrompt, onValueChange = { text -> vm.editSettings { it.copy(negativePrompt = text) } }, label = { Text("Negative Prompt") },
-            minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth())
+        if (mode != GenerationMode.EXTRAS) {
+            OutlinedTextField(value = current.prompt, onValueChange = { text -> vm.editSettings { it.copy(prompt = text) } }, label = { Text("Prompt") },
+                minLines = 3, maxLines = 8, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = current.negativePrompt, onValueChange = { text -> vm.editSettings { it.copy(negativePrompt = text) } }, label = { Text("Negative Prompt") },
+                minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth())
 
-        SectionCard("Generierung") {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Choice("Sampler", current.sampler, state.options?.samplers.orEmpty(), Modifier.weight(1f)) { value -> vm.editSettings { it.copy(sampler = value) } }
-                Choice("Scheduler", current.scheduler, state.options?.schedulers.orEmpty(), Modifier.weight(1f)) { value -> vm.editSettings { it.copy(scheduler = value) } }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NumberInput("Steps", current.steps.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(steps = value) } } }
-                NumberInput("CFG Scale", current.cfgScale.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { value -> vm.editSettings { s -> s.copy(cfgScale = value) } } }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NumberInput("Breite", current.width.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(width = value) } } }
-                NumberInput("Höhe", current.height.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(height = value) } } }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NumberInput("Seed (-1 = zufällig)", current.seed.toString(), Modifier.weight(2f), KeyboardType.Number) { it.toLongOrNull()?.let { value -> vm.editSettings { s -> s.copy(seed = value) } } }
-                NumberInput("Batch", current.batchSize.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(batchSize = value) } } }
-            }
-            Choice("Checkpoint", current.checkpoint.ifBlank { state.options?.activeCheckpoint.orEmpty() }, state.options?.checkpoints.orEmpty(), Modifier.fillMaxWidth()) { value -> vm.editSettings { it.copy(checkpoint = value) } }
-            LoraPicker(state, vm)
-        }
-
-        SectionCard("Hires. Fix") {
-            ToggleRow("Aktivieren", current.hiresEnabled) { vm.editSettings { s -> s.copy(hiresEnabled = it) } }
-            if (current.hiresEnabled) {
+            SectionCard("Generierung") {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NumberInput("Upscale", current.hiresScale.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { n -> vm.editSettings { s -> s.copy(hiresScale = n) } } }
-                    NumberInput("Denoising", current.hiresDenoising.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { n -> vm.editSettings { s -> s.copy(hiresDenoising = n) } } }
+                    Choice("Sampler", current.sampler, state.options?.samplers.orEmpty(), Modifier.weight(1f)) { value -> vm.editSettings { it.copy(sampler = value) } }
+                    Choice("Scheduler", current.scheduler, state.options?.schedulers.orEmpty(), Modifier.weight(1f)) { value -> vm.editSettings { it.copy(scheduler = value) } }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    NumberInput("Steps", current.steps.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(steps = value) } } }
+                    NumberInput("CFG Scale", current.cfgScale.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { value -> vm.editSettings { s -> s.copy(cfgScale = value) } } }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    NumberInput("Breite", current.width.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(width = value) } } }
+                    NumberInput("Höhe", current.height.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(height = value) } } }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    NumberInput("Seed (-1 = zufällig)", current.seed.toString(), Modifier.weight(2f), KeyboardType.Number) { it.toLongOrNull()?.let { value -> vm.editSettings { s -> s.copy(seed = value) } } }
+                    NumberInput("Batch", current.batchSize.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(batchSize = value) } } }
+                }
+                Choice("Checkpoint", current.checkpoint.ifBlank { state.options?.activeCheckpoint.orEmpty() }, state.options?.checkpoints.orEmpty(), Modifier.fillMaxWidth()) { value -> vm.editSettings { it.copy(checkpoint = value) } }
+                LoraPicker(state, vm)
+            }
+
+            if (mode == GenerationMode.IMG2IMG) {
+                SectionCard("img2img") {
+                    NumberInput("Denoising Strength", current.img2imgDenoising.toString(),
+                        Modifier.fillMaxWidth(), KeyboardType.Decimal) { input ->
+                        input.toFloatOrNull()?.let { value ->
+                            vm.editSettings { it.copy(img2imgDenoising = value.coerceIn(0f, 1f)) }
+                        }
+                    }
+                }
+            } else {
+                SectionCard("Hires. Fix") {
+                    ToggleRow("Aktivieren", current.hiresEnabled) { vm.editSettings { s -> s.copy(hiresEnabled = it) } }
+                    if (current.hiresEnabled) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            NumberInput("Upscale", current.hiresScale.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { n -> vm.editSettings { s -> s.copy(hiresScale = n) } } }
+                            NumberInput("Denoising", current.hiresDenoising.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { n -> vm.editSettings { s -> s.copy(hiresDenoising = n) } } }
+                        }
+                    }
                 }
             }
+            AdetailerCard(current, state, vm)
+
+        } else {
+        SectionCard("Extras · Upscaling und Wiederherstellung") {
+            Choice("Upscaler", state.extras.upscaler,
+                state.options?.upscalers.orEmpty(), Modifier.fillMaxWidth()) { value ->
+                vm.editExtras { it.copy(upscaler = value) }
+            }
+            NumberInput("Upscaling (1–4×)", state.extras.scale.toString(),
+                Modifier.fillMaxWidth(), KeyboardType.Decimal) { input ->
+                input.toFloatOrNull()?.let { value ->
+                    vm.editExtras { it.copy(scale = value.coerceIn(1f, 4f)) }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                NumberInput("GFPGAN (0–1)", state.extras.gfpgan.toString(),
+                    Modifier.weight(1f), KeyboardType.Decimal) { input ->
+                    input.toFloatOrNull()?.let { value ->
+                        vm.editExtras { it.copy(gfpgan = value.coerceIn(0f, 1f)) }
+                    }
+                }
+                NumberInput("CodeFormer (0–1)", state.extras.codeformer.toString(),
+                    Modifier.weight(1f), KeyboardType.Decimal) { input ->
+                    input.toFloatOrNull()?.let { value ->
+                        vm.editExtras { it.copy(codeformer = value.coerceIn(0f, 1f)) }
+                    }
+                }
+            }
+            NumberInput("CodeFormer Weight", state.extras.codeformerWeight.toString(),
+                Modifier.fillMaxWidth(), KeyboardType.Decimal) { input ->
+                input.toFloatOrNull()?.let { value ->
+                    vm.editExtras { it.copy(codeformerWeight = value.coerceIn(0f, 1f)) }
+                }
+            }
+            Text("Extras verarbeitet das gewählte Bild auf dem PC. Es verwendet keinen Prompt oder Sampler.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary)
         }
 
-        AdetailerCard(current, state, vm)
+        }
 
         if (state.isGenerating) {
             LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth())
@@ -173,7 +264,13 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
                 OutlinedButton(onClick = vm::skip, modifier = Modifier.weight(1f)) { Text("Skip") }
             }
         } else {
-            Button(onClick = vm::generate, enabled = state.connectedUrl.isNotEmpty(), modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Generate", fontWeight = FontWeight.Bold) }
+            Button(onClick = vm::generate,
+                enabled = state.connectedUrl.isNotEmpty() &&
+                    (mode == GenerationMode.TXT2IMG || state.sourcePreview != null),
+                modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                Text(if (mode == GenerationMode.EXTRAS) "Bild verarbeiten" else "Generate",
+                    fontWeight = FontWeight.Bold)
+            }
         }
         state.generated.forEachIndexed { index, bitmap ->
             Image(bitmap.asImageBitmap(), "Generiertes Bild ${index + 1}", Modifier.fillMaxWidth().heightIn(max = 460.dp), contentScale = ContentScale.Fit)
@@ -182,49 +279,110 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
     }
 }
 
+
 @Composable
 private fun AdetailerCard(settings: GenerationSettings, state: UiState, vm: RemoteViewModel) {
-    val ad = settings.adetailer
+    val units = listOf(settings.adetailer) + settings.additionalAdetailers
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val index = selectedTab.coerceIn(0, units.lastIndex)
+    val ad = units[index]
     var expanded by remember { mutableStateOf(true) }
     SectionCard("ADetailer") {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.weight(1f)) { Text(if (expanded) "Optionen einklappen" else "Optionen anzeigen") }
-            Switch(checked = ad.enabled, onCheckedChange = { value -> vm.editSettings { it.copy(adetailer = ad.copy(enabled = value)) } })
+        if (state.options != null && !state.options.adetailerInstalled) {
+            Text("ADetailer wurde auf dem PC nicht erkannt.",
+                color = Color(0xFFFFC77D), style = MaterialTheme.typography.bodySmall)
         }
-        if (ad.enabled && state.options != null && !state.options.adetailerInstalled) {
-            Text("ADetailer wurde in der A1111-Script-Liste nicht gefunden. Bitte Extension und API prüfen.", color = Color(0xFFFFC77D), style = MaterialTheme.typography.bodySmall)
+        ScrollableTabRow(selectedTabIndex = index, edgePadding = 0.dp) {
+            units.forEachIndexed { pos, unit ->
+                val name = when (pos) { 0 -> "Face"; 1 -> "Hand"; else -> "Tab ${pos + 1}" }
+                Tab(selected = index == pos, onClick = { selectedTab = pos },
+                    text = { Text("$name ${if (unit.enabled) "✓" else "○"}") })
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Tab ${index + 1} aktivieren", Modifier.weight(1f))
+            Switch(checked = ad.enabled, onCheckedChange = { enabled ->
+                vm.updateAdetailer(index) { copy(enabled = enabled) }
+            })
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(if (expanded) "Weniger anzeigen" else "Optionen anzeigen")
+            }
+            if (units.size < 5) {
+                TextButton(onClick = { vm.addAdetailerTab(); selectedTab = units.size }) {
+                    Text("+ Tab")
+                }
+            }
+            if (index > 0 && units.size > 2) {
+                TextButton(onClick = { vm.removeAdetailerTab(index); selectedTab = 0 }) {
+                    Text("Tab entfernen")
+                }
+            }
         }
         if (expanded) {
             if (state.options?.adetailerModels?.isNotEmpty() == true) {
-                Choice("Detection Model", ad.model, state.options.adetailerModels, Modifier.fillMaxWidth()) { value ->
-                    updateAd(vm, ad) { copy(model = value) }
+                Choice("Detection Model", ad.model, state.options.adetailerModels,
+                    Modifier.fillMaxWidth()) { value ->
+                    vm.updateAdetailer(index) { copy(model = value) }
                 }
             } else {
-                OutlinedTextField(value = ad.model, onValueChange = { newValue -> updateAd(vm, ad) { copy(model = newValue) } },
-                    label = { Text("Detection Model (Dateiname)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(value = ad.model, onValueChange = { value ->
+                    vm.updateAdetailer(index) { copy(model = value) }
+                }, label = { Text("Detection Model") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true)
             }
-            OutlinedTextField(value = ad.prompt, onValueChange = { newValue -> updateAd(vm, ad) { copy(prompt = newValue) } },
-                label = { Text("ADetailer Prompt") }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5)
-            OutlinedTextField(value = ad.negativePrompt, onValueChange = { newValue -> updateAd(vm, ad) { copy(negativePrompt = newValue) } },
-                label = { Text("ADetailer Negative Prompt") }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 4)
+            OutlinedTextField(value = ad.prompt, onValueChange = { value ->
+                vm.updateAdetailer(index) { copy(prompt = value) }
+            }, label = { Text("ADetailer Prompt") },
+                modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5)
+            OutlinedTextField(value = ad.negativePrompt, onValueChange = { value ->
+                vm.updateAdetailer(index) { copy(negativePrompt = value) }
+            }, label = { Text("ADetailer Negative Prompt") },
+                modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NumberInput("Confidence (0–1)", ad.confidence.toString(), Modifier.weight(1f), KeyboardType.Decimal) { n -> n.toFloatOrNull()?.let { value -> updateAd(vm, ad) { copy(confidence = value) } } }
-                NumberInput("Denoising (0–1)", ad.denoising.toString(), Modifier.weight(1f), KeyboardType.Decimal) { n -> n.toFloatOrNull()?.let { value -> updateAd(vm, ad) { copy(denoising = value) } } }
+                NumberInput("Confidence (0–1)", ad.confidence.toString(),
+                    Modifier.weight(1f), KeyboardType.Decimal) { input ->
+                    input.toFloatOrNull()?.let { value ->
+                        vm.updateAdetailer(index) { copy(confidence = value.coerceIn(0f, 1f)) }
+                    }
+                }
+                NumberInput("Denoising (0–1)", ad.denoising.toString(),
+                    Modifier.weight(1f), KeyboardType.Decimal) { input ->
+                    input.toFloatOrNull()?.let { value ->
+                        vm.updateAdetailer(index) { copy(denoising = value.coerceIn(0f, 1f)) }
+                    }
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NumberInput("Mask Blur", ad.maskBlur.toString(), Modifier.weight(1f), KeyboardType.Number) { n -> n.toIntOrNull()?.let { value -> updateAd(vm, ad) { copy(maskBlur = value) } } }
-                NumberInput("Padding", ad.padding.toString(), Modifier.weight(1f), KeyboardType.Number) { n -> n.toIntOrNull()?.let { value -> updateAd(vm, ad) { copy(padding = value) } } }
-                NumberInput("Dilation", ad.dilation.toString(), Modifier.weight(1f), KeyboardType.Number) { n -> n.toIntOrNull()?.let { value -> updateAd(vm, ad) { copy(dilation = value) } } }
+                NumberInput("Mask Blur", ad.maskBlur.toString(),
+                    Modifier.weight(1f), KeyboardType.Number) { input ->
+                    input.toIntOrNull()?.let { value ->
+                        vm.updateAdetailer(index) { copy(maskBlur = value) }
+                    }
+                }
+                NumberInput("Padding", ad.padding.toString(),
+                    Modifier.weight(1f), KeyboardType.Number) { input ->
+                    input.toIntOrNull()?.let { value ->
+                        vm.updateAdetailer(index) { copy(padding = value) }
+                    }
+                }
             }
-            ToggleRow("Nur Maske inpainten", ad.onlyMasked) { value -> updateAd(vm, ad) { copy(onlyMasked = value) } }
+            NumberInput("Mask erosion (-) / dilation (+)", ad.dilation.toString(),
+                Modifier.fillMaxWidth(), KeyboardType.Number) { input ->
+                input.toIntOrNull()?.let { value ->
+                    vm.updateAdetailer(index) { copy(dilation = value) }
+                }
+            }
+            Text("Negativ = Maske verkleinern, positiv = Maske vergrößern.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary)
+            ToggleRow("Nur Maske inpainten", ad.onlyMasked) { enabled ->
+                vm.updateAdetailer(index) { copy(onlyMasked = enabled) }
+            }
         }
     }
 }
-
-private fun updateAd(vm: RemoteViewModel, ad: AdetailerSettings, action: AdetailerSettings.() -> AdetailerSettings) {
-    vm.editSettings { it.copy(adetailer = ad.action()) }
-}
-
 
 @Composable
 private fun LoraPicker(state: UiState, vm: RemoteViewModel) {
@@ -389,7 +547,14 @@ private fun GalleryScreen(state: UiState, vm: RemoteViewModel) {
                     Text("Original herunterladen")
                 }
             },
-            dismissButton = { TextButton(onClick = { selectedPc = null }) { Text("Schließen") } })
+            dismissButton = {
+                TextButton(onClick = {
+                    vm.usePcImageAsSource(item)
+                    vm.selectMode(GenerationMode.IMG2IMG)
+                    selectedPc = null
+                }) { Text("Als img2img-Quelle") }
+                TextButton(onClick = { selectedPc = null }) { Text("Schließen") }
+            })
     }
 }
 
