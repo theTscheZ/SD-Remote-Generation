@@ -29,6 +29,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      - name: Validate Windows PC helper syntax
+        run: python -m py_compile pc-control/pc_control_helper.py
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
       - name: Build debug APK
