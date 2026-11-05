@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.a1111remote.app.model.AdetailerSettings
 import com.a1111remote.app.model.GenerationSettings
+import com.a1111remote.app.data.PcImage
 import com.a1111remote.app.ui.LocalImage
 import com.a1111remote.app.ui.RemoteViewModel
 import com.a1111remote.app.ui.UiState
@@ -82,7 +83,7 @@ private fun RemoteApp(vm: RemoteViewModel) {
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(selected = screen == Screen.GENERATE, onClick = { screen = Screen.GENERATE }, icon = { Icon(Icons.Default.Tune, null) }, label = { Text("Generate") })
-                NavigationBarItem(selected = screen == Screen.GALLERY, onClick = { vm.refreshGallery(); screen = Screen.GALLERY }, icon = { Icon(Icons.Default.Image, null) }, label = { Text("Galerie") })
+                NavigationBarItem(selected = screen == Screen.GALLERY, onClick = { vm.refreshGallery(); vm.refreshPcGallery(); screen = Screen.GALLERY }, icon = { Icon(Icons.Default.Image, null) }, label = { Text("Galerie") })
                 NavigationBarItem(selected = screen == Screen.CONNECTION, onClick = { screen = Screen.CONNECTION }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Verbindung") })
             }
         }
@@ -106,6 +107,18 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
     val current = state.settings
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Spacer(Modifier.height(2.dp))
+        OutlinedButton(
+            onClick = vm::restorePcParameters,
+            enabled = state.bridgeAvailable && !state.isRestoring,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (state.isRestoring) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            else Text("Letzte PC-Parameter übernehmen")
+        }
+        if (state.connectedUrl.isNotBlank() && !state.bridgeAvailable) {
+            Text("PC-Parameter und PC-Galerie: A1111 Remote-Erweiterung am PC installieren.",
+                color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
+        }
         if (state.connectedUrl.isBlank()) {
             OutlinedCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenConnection)) {
                 Text("Noch nicht verbunden · PC-Verbindung einrichten", Modifier.padding(14.dp), color = accent)
@@ -212,49 +225,171 @@ private fun updateAd(vm: RemoteViewModel, ad: AdetailerSettings, action: Adetail
     vm.editSettings { it.copy(adetailer = ad.action()) }
 }
 
+
 @Composable
 private fun LoraPicker(state: UiState, vm: RemoteViewModel) {
     val loras = state.options?.loras.orEmpty()
-    if (loras.isEmpty()) return
-    var selection by remember { mutableStateOf(loras.first()) }
+    var search by remember { mutableStateOf("") }
     var weight by remember { mutableStateOf("1.0") }
-    Text("LoRA zum Prompt hinzufügen", style = MaterialTheme.typography.labelMedium)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Choice("LoRA", selection, loras, Modifier.weight(1.5f)) { selection = it }
-        OutlinedTextField(value = weight, onValueChange = { weight = it }, label = { Text("Gewicht") }, singleLine = true,
-            modifier = Modifier.weight(.8f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+    val selected = remember(state.settings.prompt) {
+        Regex("<lora:([^:>]+):[^>]+>", RegexOption.IGNORE_CASE)
+            .findAll(state.settings.prompt).map { it.groupValues[1] }.toList()
     }
-    OutlinedButton(onClick = { vm.appendLora(selection, weight) }, enabled = selection.isNotBlank()) { Text("LoRA einfügen") }
+    Text("PC-LoRAs", style = MaterialTheme.typography.titleSmall)
+    if (loras.isEmpty()) {
+        Text("Keine LoRAs vom PC geladen. Verbindung prüfen oder neu verbinden.",
+            color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    OutlinedTextField(value = search, onValueChange = { search = it },
+        label = { Text("LoRA suchen (${loras.size} auf dem PC)") }, singleLine = true,
+        modifier = Modifier.fillMaxWidth())
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Gewicht für neue LoRAs", modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(value = weight, onValueChange = { weight = it },
+            label = { Text("Gewicht") }, singleLine = true, modifier = Modifier.width(120.dp),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+    }
+    if (selected.isNotEmpty()) {
+        Text("Aktiv im Prompt (antippen zum Entfernen)", style = MaterialTheme.typography.labelMedium)
+        selected.forEach { name ->
+            TextButton(onClick = { vm.toggleLora(name, weight) }) { Text("✓ $name   ✕") }
+        }
+    }
+    val matched = remember(loras, search) {
+        loras.filter { it.contains(search.trim(), ignoreCase = true) }
+    }
+    Text(if (search.isBlank()) "LoRAs antippen zum Hinzufügen · Suche für weitere Einträge"
+        else "${matched.size} Treffer · Antippen zum Hinzufügen oder Entfernen",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+    matched.take(if (search.isBlank()) 12 else 35).forEach { name ->
+        val active = selected.any { it.equals(name, ignoreCase = true) }
+        OutlinedButton(onClick = { vm.toggleLora(name, weight) }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (active) "✓  $name   (entfernen)" else "+  $name",
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+    if (matched.size > (if (search.isBlank()) 12 else 35)) {
+        Text("Weitere LoRAs über die Suche finden.",
+            color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
+    }
 }
 
 @Composable
 private fun GalleryScreen(state: UiState, vm: RemoteViewModel) {
-    var selected by remember { mutableStateOf<LocalImage?>(null) }
-    if (state.gallery.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Noch keine lokal gespeicherten Bilder.\nGeneriere zuerst dein erstes Bild.", color = MaterialTheme.colorScheme.secondary)
+    var showPc by remember { mutableStateOf(false) }
+    var selectedLocal by remember { mutableStateOf<LocalImage?>(null) }
+    var selectedPc by remember { mutableStateOf<PcImage?>(null) }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilterChip(selected = !showPc, onClick = { showPc = false },
+                label = { Text("Handy") })
+            FilterChip(selected = showPc, onClick = { showPc = true; vm.refreshPcGallery() },
+                label = { Text("PC") })
+            if (showPc && state.bridgeAvailable) {
+                TextButton(onClick = vm::refreshPcGallery) { Text("Aktualisieren") }
+            }
         }
-    } else {
-        LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(state.gallery, key = { it.file.absolutePath }) { item ->
-                Card(Modifier.fillMaxWidth().clickable { selected = item }) {
-                    Image(item.preview.asImageBitmap(), "Generiertes Bild", Modifier.fillMaxWidth().height(190.dp), contentScale = ContentScale.Crop)
-                    Text(item.label, Modifier.padding(8.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (!showPc) {
+            if (state.gallery.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Noch keine lokal gespeicherten Bilder.",
+                        color = MaterialTheme.colorScheme.secondary)
+                }
+            } else {
+                LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(state.gallery, key = { it.file.absolutePath }) { item ->
+                        Card(Modifier.fillMaxWidth().clickable { selectedLocal = item }) {
+                            Image(item.preview.asImageBitmap(), "Generiertes Bild",
+                                Modifier.fillMaxWidth().height(190.dp), contentScale = ContentScale.Crop)
+                            Text(item.label, Modifier.padding(8.dp),
+                                style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        } else if (!state.bridgeAvailable) {
+            Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Text("Für die PC-Galerie muss die A1111 Remote-Erweiterung installiert sein. " +
+                    "Danach WebUI neu starten und die App erneut verbinden.",
+                    color = MaterialTheme.colorScheme.secondary)
+            }
+        } else if (state.pcImages.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                if (state.isPcLoading) CircularProgressIndicator()
+                else Text("Keine Bilder in den PC-Ausgabeordnern gefunden.",
+                    color = MaterialTheme.colorScheme.secondary)
+            }
+        } else {
+            LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(state.pcImages, key = { it.id }) { item ->
+                    LaunchedEffect(item.id) { vm.loadPcThumbnail(item) }
+                    val preview = state.pcPreviews[item.id]
+                    Card(Modifier.fillMaxWidth().clickable { selectedPc = item }) {
+                        if (preview != null) {
+                            Image(preview.asImageBitmap(), "PC-Bild",
+                                Modifier.fillMaxWidth().height(190.dp), contentScale = ContentScale.Crop)
+                        } else {
+                            Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(30.dp))
+                            }
+                        }
+                        Text(item.name, Modifier.padding(8.dp),
+                            style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }
     }
-    selected?.let { item ->
-        AlertDialog(onDismissRequest = { selected = null }, title = { Text("Gespeichertes Bild") },
+    selectedLocal?.let { item ->
+        AlertDialog(onDismissRequest = { selectedLocal = null }, title = { Text("Handy-Bild") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Image(item.preview.asImageBitmap(), "Bildvorschau", Modifier.fillMaxWidth().heightIn(max = 440.dp), contentScale = ContentScale.Fit)
+                    Image(item.preview.asImageBitmap(), "Vorschau",
+                        Modifier.fillMaxWidth().heightIn(max = 440.dp), contentScale = ContentScale.Fit)
                     Text(item.label, style = MaterialTheme.typography.bodySmall)
                 }
             },
-            confirmButton = { TextButton(onClick = { vm.exportImage(item); selected = null }) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text("In Bilder speichern") } },
-            dismissButton = { TextButton(onClick = { selected = null }) { Text("Schließen") } })
+            confirmButton = {
+                TextButton(onClick = { vm.exportImage(item); selectedLocal = null }) {
+                    Icon(Icons.Default.Download, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("In Bilder speichern")
+                }
+            },
+            dismissButton = { TextButton(onClick = { selectedLocal = null }) { Text("Schließen") } })
+    }
+    selectedPc?.let { item ->
+        AlertDialog(onDismissRequest = { selectedPc = null }, title = { Text("PC-Bild") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    state.pcPreviews[item.id]?.let { bitmap ->
+                        Image(bitmap.asImageBitmap(), "PC-Vorschau",
+                            Modifier.fillMaxWidth().heightIn(max = 440.dp), contentScale = ContentScale.Fit)
+                    }
+                    Text(item.name, style = MaterialTheme.typography.bodySmall)
+                    Text("Das Original bleibt auf dem PC, bis du es herunterlädst.",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.downloadPcImage(item); selectedPc = null }) {
+                    Icon(Icons.Default.Download, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Original herunterladen")
+                }
+            },
+            dismissButton = { TextButton(onClick = { selectedPc = null }) { Text("Schließen") } })
     }
 }
 
@@ -282,6 +417,8 @@ private fun ConnectionScreen(state: UiState, vm: RemoteViewModel) {
             Text("Verbunden über: ${state.connectedUrl}", color = Color(0xFF80D4AE), style = MaterialTheme.typography.bodyMedium)
             Text("${state.options?.checkpoints?.size ?: 0} Checkpoints · ${state.options?.loras?.size ?: 0} LoRAs · ADetailer: ${if (state.options?.adetailerInstalled == true) "erkannt" else "nicht erkannt"}",
                 style = MaterialTheme.typography.bodySmall)
+            Text(if (state.bridgeAvailable) "PC-Erweiterung: verbunden" else "PC-Erweiterung: nicht erkannt",
+                color = if (state.bridgeAvailable) Color(0xFF80D4AE) else MaterialTheme.colorScheme.secondary)
         }
         SectionCard("Einrichtung am PC") {
             Text("1. Tailscale auf PC und Handy installieren und beide im selben Tailnet anmelden.")
