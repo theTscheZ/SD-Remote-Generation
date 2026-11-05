@@ -12,8 +12,8 @@ android {
         applicationId = "com.a1111remote.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -57,6 +57,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.3")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
