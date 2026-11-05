@@ -1,11 +1,16 @@
 .gradle/
 .idea/
-build/
+/build/
 **/build/
-local.properties
 *.iml
+local.properties
 *.jks
 *.keystore
 *.apk
 *.aab
 .DS_Store
+captures/
+# Do not commit local credentials, saved prompts or generated images.
+secrets.properties
+private/
+output/
