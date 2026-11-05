@@ -2,7 +2,7 @@
 
 Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted AUTOMATIC1111 Stable Diffusion WebUI** on a Windows PC.
 
-> **Status:** v0.2.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
+> **Status:** v0.3.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
 
 ## Included in v0.1
 
@@ -10,12 +10,13 @@ Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted
 - Optional HTTP Basic API authentication (password encrypted using Android Keystore)
 - `txt2img`: positive/negative prompts, steps, CFG, width, height, batch, seed, sampler, scheduler, checkpoint
 - Search all LoRAs from the PC using `/sdapi/v1/loras`; tap to add a LoRA tag to the prompt, tap again to remove it
+- txt2img, img2img (with image selection and denoising), and Extras (upscaling and restoration) workflows
 - Hires. Fix scale and denoising
-- ADetailer: enabled, detector, prompts, confidence, denoising, mask blur, padding, dilation, masked inpainting; detect installed extension; list detector choices when exposed by `/sdapi/v1/script-info`
+- ADetailer: independently toggleable Face and Hand tabs, plus optional additional tabs; detector, prompts, confidence, denoising, mask blur, padding, mask erosion/dilation
 - Progress bar, intermittent live preview, interrupt/skip
 - Locally stored results, thumbnails, image export to Android Pictures
 - Last-used generation settings saved locally
-- Optional PC bridge: paste last PC WebUI generation settings from `params.txt`; browse the 80 most recent images from PC output directories and download originals into the Android photo gallery
+- Optional PC bridge: restore PC generation parameters by mode from `params.txt` or mode-specific output metadata; browse the 80 most recent images from PC output directories and download originals into the Android photo gallery
 
 ## Install / build
 
@@ -91,6 +92,21 @@ the public internet.
 APKs. A stable private release signing keystore must be configured separately
 before Android can reliably install future builds as in-place updates. Never
 commit a private keystore or its password to this public repository.
+
+## Stable Android signing and in-place updates
+
+The project's private PKCS12 keystore and credentials are backed up in the owner's private ChatGPT Library folder \`/A1111-Remote\` (NOT in this public repository). Since prior debug APKs were signed with short-lived runner keys, moving to the stable key requires a **one-time uninstall**. Install the stable-key-signed APK v0.3.0 afterward. Following releases must use the same certificate and a higher versionCode to install over it.
+
+To make GitHub Actions produce updateable signed release APKs, the owner must configure 2 repository secrets in **Settings > Secrets and variables > Actions**:
+
+- \`A1111_SIGNING_P12_BASE64\`: base64 of the private \`a1111-remote-update-key.p12\`. PowerShell: \`[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\a1111-remote-update-key.p12"))\`
+- \`A1111_SIGNING_PASSWORD\`: password from the private \`signing-credentials.txt\`.
+
+After that, download the \`A1111Remote-STABLE-signed-release\` GitHub Actions artifact. Without configured secrets CI outputs only a clearly marked, **non-updateable** temporary debug APK. Never commit a private signing keystore or password to this public repository.
+
+## PC parameter recovery by mode
+
+In txt2img, the bridge tries A1111's saved \`params.txt\` and falls back to txt2img output metadata. In img2img, it uses the latest saved img2img image metadata. For Extras, only upscaler and scale can be restored when these were included in saved Extras output metadata; other Extras fields remain at the existing app setting. You must update the installed bridge script and restart the WebUI after the v0.3.0 update.
 
 ## Technical architecture
 
