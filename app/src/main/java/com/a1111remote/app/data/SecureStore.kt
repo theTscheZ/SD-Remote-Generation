@@ -67,6 +67,17 @@ class SecureStore(context: Context) {
             .apply()
     }
 
+    fun pcMac(): String = preferences.getString("pcMac", "").orEmpty()
+    fun pcToken(): String = decrypt(preferences.getString("pcControllerToken", "").orEmpty())
+
+    fun savePcMac(mac: String) {
+        preferences.edit().putString("pcMac", mac).apply()
+    }
+
+    fun savePcToken(token: String) {
+        preferences.edit().putString("pcControllerToken", encrypt(token.trim())).apply()
+    }
+
     fun generation(): GenerationSettings = runCatching {
         GenerationSettings.fromJson(JSONObject(preferences.getString("generation", "{}") ?: "{}"))
     }.getOrElse { GenerationSettings() }
