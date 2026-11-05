@@ -12,6 +12,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.a1111remote.app.data.A1111Api
+import com.a1111remote.app.data.PcControlClient
+import com.a1111remote.app.data.PcControllerStatus
 import com.a1111remote.app.GenerationStatusService
 import com.a1111remote.app.data.PcImage
 import com.a1111remote.app.data.SecureStore
@@ -56,15 +58,22 @@ data class UiState(
     val pcPreviews: Map<String, Bitmap> = emptyMap(),
     val isPcLoading: Boolean = false,
     val isRestoring: Boolean = false,
-    val message: String = ""
+    val message: String = "",
+    val pcMac: String = "",
+    val pcControllerToken: String = "",
+    val pcControllerStatus: PcControllerStatus? = null,
+    val pcControlBusy: Boolean = false,
+    val pcControlMessage: String = ""
 )
 
 class RemoteViewModel(application: Application) : AndroidViewModel(application) {
     private val store = SecureStore(application)
     private val api = A1111Api()
+    private val pcControl = PcControlClient()
     var state by androidx.compose.runtime.mutableStateOf(
         UiState(connection = store.connection(), settings = store.generation(store.mode()),
-            mode = store.mode(), extras = store.extras())
+            mode = store.mode(), extras = store.extras(),
+            pcMac = store.pcMac(), pcControllerToken = store.pcToken())
     )
         private set
 
@@ -80,6 +89,70 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         val updated = transform(state.connection)
         state = state.copy(connection = updated, connectedUrl = "", options = null, bridgeAvailable = false, pcImages = emptyList(), pcPreviews = emptyMap())
         store.saveConnection(updated)
+    }
+
+    fun setPcMac(value: String) {
+        state = state.copy(pcMac = value)
+        store.savePcMac(value)
+    }
+
+    fun setPcToken(value: String) {
+        state = state.copy(pcControllerToken = value)
+        store.savePcToken(value)
+    }
+
+    fun refreshPcControl() {
+        if (state.pcControlBusy || state.pcControllerToken.isBlank()) return
+        viewModelScope.launch {
+            state = state.copy(pcControlBusy = true)
+            try {
+                val status = pcControl.status(state.connection, state.pcControllerToken)
+                state = state.copy(pcControllerStatus = status,
+                    pcControlMessage = "PC-Steuerung verbunden.")
+            } catch (e: Exception) {
+                state = state.copy(pcControllerStatus = null,
+                    pcControlMessage = "PC-Steuerung nicht erreichbar: ${e.message}")
+            } finally {
+                state = state.copy(pcControlBusy = false)
+            }
+        }
+    }
+
+    fun pcAction(action: String) {
+        if (state.pcControlBusy || action !in setOf("start", "stop", "shutdown", "shutdown/cancel")) return
+        viewModelScope.launch {
+            state = state.copy(pcControlBusy = true, pcControlMessage = "Befehl wird gesendet …")
+            try {
+                val message = pcControl.action(state.connection, state.pcControllerToken, action)
+                state = state.copy(pcControlMessage = message)
+                if (action != "shutdown") {
+                    val status = runCatching {
+                        pcControl.status(state.connection, state.pcControllerToken)
+                    }.getOrNull()
+                    state = state.copy(pcControllerStatus = status)
+                }
+            } catch (e: Exception) {
+                state = state.copy(pcControlMessage = "Befehl fehlgeschlagen: ${e.message}")
+            } finally {
+                state = state.copy(pcControlBusy = false)
+            }
+        }
+    }
+
+    fun wakePc() {
+        if (state.pcControlBusy) return
+        viewModelScope.launch {
+            state = state.copy(pcControlBusy = true, pcControlMessage = "Wake-on-LAN wird gesendet …")
+            try {
+                pcControl.wake(getApplication<Application>(), state.pcMac)
+                state = state.copy(pcControlMessage =
+                    "Wake-on-LAN gesendet. Der PC braucht eventuell etwas Zeit zum Hochfahren.")
+            } catch (e: Exception) {
+                state = state.copy(pcControlMessage = "Wake-on-LAN fehlgeschlagen: ${e.message}")
+            } finally {
+                state = state.copy(pcControlBusy = false)
+            }
+        }
     }
 
     fun editSettings(transform: (GenerationSettings) -> GenerationSettings) {
