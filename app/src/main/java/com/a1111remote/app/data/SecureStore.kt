@@ -6,6 +6,8 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.a1111remote.app.model.ConnectionSettings
 import com.a1111remote.app.model.GenerationSettings
+import com.a1111remote.app.model.GenerationMode
+import com.a1111remote.app.model.ExtrasSettings
 import org.json.JSONObject
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -70,6 +72,33 @@ class SecureStore(context: Context) {
     }.getOrElse { GenerationSettings() }
 
     fun saveGeneration(settings: GenerationSettings) {
-        preferences.edit().putString("generation", settings.toJson().toString()).apply()
+        saveGeneration(settings, GenerationMode.TXT2IMG)
+    }
+
+    fun generation(mode: GenerationMode): GenerationSettings = runCatching {
+        val key = if (mode == GenerationMode.IMG2IMG) "generation_img2img" else "generation"
+        val raw = preferences.getString(key, "{}") ?: "{}"
+        GenerationSettings.fromJson(JSONObject(raw))
+    }.getOrElse { GenerationSettings() }
+
+    fun saveGeneration(settings: GenerationSettings, mode: GenerationMode) {
+        val key = if (mode == GenerationMode.IMG2IMG) "generation_img2img" else "generation"
+        preferences.edit().putString(key, settings.toJson().toString()).apply()
+    }
+
+    fun extras(): ExtrasSettings = runCatching {
+        ExtrasSettings.fromJson(JSONObject(preferences.getString("extras", "{}") ?: "{}"))
+    }.getOrElse { ExtrasSettings() }
+
+    fun saveExtras(settings: ExtrasSettings) {
+        preferences.edit().putString("extras", settings.toJson().toString()).apply()
+    }
+
+    fun mode(): GenerationMode = runCatching {
+        GenerationMode.valueOf(preferences.getString("mode", "TXT2IMG") ?: "TXT2IMG")
+    }.getOrDefault(GenerationMode.TXT2IMG)
+
+    fun saveMode(mode: GenerationMode) {
+        preferences.edit().putString("mode", mode.name).apply()
     }
 }
