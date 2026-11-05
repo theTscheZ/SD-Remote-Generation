@@ -24,6 +24,9 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -58,7 +61,7 @@ import com.a1111remote.app.ui.UiState
 private val accent = Color(0xFF8CB5FF)
 private val scheme = darkColorScheme(primary = accent, secondary = Color(0xFFB1C5EA), surface = Color(0xFF171C26), background = Color(0xFF0D111B))
 
-private enum class Screen { GENERATE, GALLERY, CONNECTION }
+private enum class Screen { GENERATE, GALLERY, CONTROL, CONNECTION }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -149,6 +152,9 @@ private fun RemoteApp(vm: RemoteViewModel) {
             NavigationBar {
                 NavigationBarItem(selected = screen == Screen.GENERATE, onClick = { screen = Screen.GENERATE }, icon = { Icon(Icons.Default.Tune, null) }, label = { Text("Generate") })
                 NavigationBarItem(selected = screen == Screen.GALLERY, onClick = { vm.refreshGallery(); vm.refreshPcGallery(); screen = Screen.GALLERY }, icon = { Icon(Icons.Default.Image, null) }, label = { Text("Galerie") })
+                NavigationBarItem(selected = screen == Screen.CONTROL,
+                    onClick = { screen = Screen.CONTROL; vm.refreshPcControl() },
+                    icon = { Icon(Icons.Default.Computer, null) }, label = { Text("PC") })
                 NavigationBarItem(selected = screen == Screen.CONNECTION, onClick = { screen = Screen.CONNECTION }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Verbindung") })
             }
         }
@@ -161,6 +167,7 @@ private fun RemoteApp(vm: RemoteViewModel) {
             when (screen) {
                 Screen.GENERATE -> GenerateScreen(state, vm, onOpenConnection = { screen = Screen.CONNECTION }, onGenerate = startGeneration)
                 Screen.GALLERY -> GalleryScreen(state, vm)
+                Screen.CONTROL -> PcControlScreen(state, vm)
                 Screen.CONNECTION -> ConnectionScreen(state, vm)
             }
         }
@@ -636,6 +643,116 @@ private fun GalleryScreen(state: UiState, vm: RemoteViewModel) {
                 }) { Text("Als img2img-Quelle") }
                 TextButton(onClick = { selectedPc = null }) { Text("Schließen") }
             })
+    }
+}
+
+@Composable
+private fun PcControlScreen(state: UiState, vm: RemoteViewModel) {
+    var confirmShutdown by remember { mutableStateOf(false) }
+    val status = state.pcControllerStatus
+    val busy = state.pcControlBusy
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("PC-Steuerung", style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold)
+        Text("Zum Einschalten im Heim-WLAN: Wake-on-LAN. Für Start/Stopp/Shutdown: " +
+            "Windows-Helfer auf Port 42001. Tailscale ist für diese Befehle optional.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary)
+        SectionCard("Einrichten") {
+            OutlinedTextField(
+                value = state.pcMac, onValueChange = vm::setPcMac,
+                label = { Text("PC-MAC-Adresse (Ethernet)") },
+                placeholder = { Text("AA:BB:CC:DD:EE:FF") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true
+            )
+            OutlinedTextField(
+                value = state.pcControllerToken, onValueChange = vm::setPcToken,
+                label = { Text("Controller-Token vom PC-Helfer") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                visualTransformation = PasswordVisualTransformation()
+            )
+            Text("Der Token wird verschlüsselt gespeichert. Die IP-Adressen kommen " +
+                "von der Verbindungsseite; Port 42001 wird automatisch verwendet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary)
+        }
+        SectionCard("PC und AUTOMATIC1111") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when {
+                        status == null -> "Controller: nicht verbunden"
+                        status.a1111Reachable -> "PC online · A1111 läuft"
+                        else -> "PC online · A1111 gestoppt"
+                    }, modifier = Modifier.weight(1f),
+                    color = if (status != null) Color(0xFF80D4AE)
+                        else MaterialTheme.colorScheme.secondary
+                )
+                IconButton(onClick = vm::refreshPcControl,
+                    enabled = !busy && state.pcControllerToken.isNotBlank()) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Status aktualisieren")
+                }
+            }
+            if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (state.pcControlMessage.isNotBlank()) {
+                Text(state.pcControlMessage, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary)
+            }
+            OutlinedButton(onClick = vm::wakePc, modifier = Modifier.fillMaxWidth(),
+                enabled = !busy && state.pcMac.isNotBlank()) {
+                Icon(Icons.Default.PowerSettingsNew, null)
+                Spacer(Modifier.width(8.dp))
+                Text("PC einschalten (Wake-on-LAN)")
+            }
+            Button(onClick = { vm.pcAction("start") }, modifier = Modifier.fillMaxWidth(),
+                enabled = !busy && state.pcControllerToken.length >= 32 &&
+                    status != null && !status.a1111Reachable && !status.a1111Managed) {
+                Text("A1111 starten")
+            }
+            OutlinedButton(onClick = { vm.pcAction("stop") }, modifier = Modifier.fillMaxWidth(),
+                enabled = !busy && status?.a1111Managed == true) {
+                Text("A1111 stoppen")
+            }
+            if (status?.a1111Reachable == true && status.a1111Managed == false) {
+                Text("A1111 wurde außerhalb des Helfers gestartet und kann deshalb " +
+                    "nicht über diesen Button gestoppt werden.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            OutlinedButton(onClick = { confirmShutdown = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !busy && status != null) {
+                Text("PC herunterfahren")
+            }
+            if (status?.shutdownPending == true) {
+                TextButton(onClick = { vm.pcAction("shutdown/cancel") }) {
+                    Text("Herunterfahren abbrechen (30-Sekunden-Frist)")
+                }
+            }
+        }
+        Text("Noch nicht eingerichtet? Im Repository unter pc-control/ " +
+            "den Windows-Helfer installieren. Keine Ports im Router freigeben.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary)
+    }
+    if (confirmShutdown) {
+        AlertDialog(
+            onDismissRequest = { confirmShutdown = false },
+            title = { Text("PC wirklich herunterfahren?") },
+            text = { Text("Windows wird nach 30 Sekunden heruntergefahren. " +
+                "Nicht gespeicherte Arbeit kann verloren gehen. " +
+                "Beende laufende Generierungen vorher.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmShutdown = false
+                    vm.pcAction("shutdown")
+                }) { Text("Herunterfahren") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmShutdown = false }) { Text("Abbrechen") }
+            }
+        )
     }
 }
 
