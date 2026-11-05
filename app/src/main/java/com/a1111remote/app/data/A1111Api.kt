@@ -29,6 +29,7 @@ data class ServerOptions(
 )
 
 data class Progress(val fraction: Float, val currentImage: ByteArray?)
+data class PcImage(val id: String, val name: String, val modified: Long)
 
 /** Requests are scoped to one explicitly configured private endpoint. */
 class A1111Api {
@@ -148,6 +149,52 @@ class A1111Api {
     suspend fun skip(baseUrl: String, auth: ConnectionSettings) = withContext(Dispatchers.IO) {
         request(baseUrl, auth, "/sdapi/v1/skip", JSONObject())
     }
+
+
+    /** Companion extension is opt-in and only accessible with the same --api-auth credentials. */
+    suspend fun bridgeAvailable(baseUrl: String, auth: ConnectionSettings): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching { request(baseUrl, auth, "/sd-remote/v1/status").optInt("version") == 1 }
+                .getOrDefault(false)
+        }
+
+    suspend fun lastPcParameters(baseUrl: String, auth: ConnectionSettings): JSONObject =
+        withContext(Dispatchers.IO) { request(baseUrl, auth, "/sd-remote/v1/last") }
+
+    suspend fun pcImages(baseUrl: String, auth: ConnectionSettings): List<PcImage> =
+        withContext(Dispatchers.IO) {
+            val items = request(baseUrl, auth, "/sd-remote/v1/images").optJSONArray("images") ?: JSONArray()
+            (0 until items.length()).mapNotNull { index ->
+                val item = items.optJSONObject(index) ?: return@mapNotNull null
+                val id = item.optString("id")
+                if (!id.matches(Regex("[a-f0-9]{32}"))) return@mapNotNull null
+                PcImage(id, item.optString("name"), item.optLong("modified"))
+            }
+        }
+
+    private fun pcImageBytes(baseUrl: String, auth: ConnectionSettings, id: String, preview: Boolean): ByteArray {
+        require(id.matches(Regex("[a-f0-9]{32}"))) { "Ungültige Bild-ID." }
+        val endpoint = if (preview) "preview" else "file"
+        val builder = Request.Builder().url("${normalizePrivateUrl(baseUrl)}/sd-remote/v1/images/$id/$endpoint")
+        if (auth.username.isNotBlank()) {
+            builder.header("Authorization", Credentials.basic(auth.username, auth.password))
+        }
+        client.newBuilder().readTimeout(90, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS)
+            .build().newCall(builder.build()).execute().use { response ->
+                if (!response.isSuccessful) throw ApiException("PC-Bild: HTTP ${response.code}")
+                val body = response.body ?: throw ApiException("Leere Bilddatei.")
+                if (body.contentLength() > 80_000_000L) throw ApiException("Bilddatei zu groß.")
+                return body.bytes().also {
+                    if (it.size > 80_000_000) throw ApiException("Bilddatei zu groß.")
+                }
+            }
+    }
+
+    suspend fun pcThumbnail(baseUrl: String, auth: ConnectionSettings, id: String): ByteArray =
+        withContext(Dispatchers.IO) { pcImageBytes(baseUrl, auth, id, true) }
+
+    suspend fun pcImageDownload(baseUrl: String, auth: ConnectionSettings, id: String): ByteArray =
+        withContext(Dispatchers.IO) { pcImageBytes(baseUrl, auth, id, false) }
 
     private fun decodeImage(encoded: String): ByteArray = Base64.decode(encoded.substringAfterLast(','), Base64.DEFAULT)
 }
