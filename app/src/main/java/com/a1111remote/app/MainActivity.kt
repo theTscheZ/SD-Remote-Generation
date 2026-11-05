@@ -66,7 +66,9 @@ private fun RemoteApp(vm: RemoteViewModel) {
     var screen by remember { mutableStateOf(Screen.GENERATE) }
     Scaffold(
         topBar = {
-            Surface(color = MaterialTheme.colorScheme.surface) {
+            // Keep the custom toolbar below the Android status bar on edge-to-edge devices.
+            // Scaffold propagates this adjusted toolbar height to the screen content.
+            Surface(modifier = Modifier.statusBarsPadding(), color = MaterialTheme.colorScheme.surface) {
                 Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Bolt, null, tint = accent)
                     Spacer(Modifier.width(8.dp))
