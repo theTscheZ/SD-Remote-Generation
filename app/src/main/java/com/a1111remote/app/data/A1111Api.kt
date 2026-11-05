@@ -3,6 +3,8 @@ package com.a1111remote.app.data
 import android.util.Base64
 import com.a1111remote.app.model.ConnectionSettings
 import com.a1111remote.app.model.GenerationSettings
+import com.a1111remote.app.model.GenerationMode
+import com.a1111remote.app.model.ExtrasSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Credentials
@@ -25,7 +27,8 @@ data class ServerOptions(
     val loras: List<String>,
     val activeCheckpoint: String,
     val adetailerInstalled: Boolean,
-    val adetailerModels: List<String>
+    val adetailerModels: List<String>,
+    val upscalers: List<String> = emptyList()
 )
 
 data class Progress(val fraction: Float, val currentImage: ByteArray?)
@@ -75,7 +78,7 @@ class A1111Api {
         }
         if (payload == null) builder.get()
         else builder.post(payload.toString().toRequestBody(jsonMediaType))
-        val selectedClient = if (path.startsWith("/sdapi/v1/txt2img")) client else metadataClient
+        val selectedClient = if (path.startsWith("/sdapi/v1/txt2img") || path.startsWith("/sdapi/v1/img2img") || path.startsWith("/sdapi/v1/extra-single-image")) client else metadataClient
         selectedClient.newCall(builder.build()).execute().use { response ->
             if (!response.isSuccessful) {
                 val description = when (response.code) {
@@ -125,14 +128,56 @@ class A1111Api {
                 }
             }
         }.distinct()
-        ServerOptions(models, samplers, schedulers, loras, options.optString("sd_model_checkpoint"), adScripts.isNotEmpty(), availableAdModels)
+        val upscalers = runCatching { array(baseUrl, auth, "/sdapi/v1/upscalers", "name") }.getOrDefault(emptyList())
+        ServerOptions(models, samplers, schedulers, loras, options.optString("sd_model_checkpoint"), adScripts.isNotEmpty(), availableAdModels, upscalers)
     }
 
-    suspend fun generate(baseUrl: String, auth: ConnectionSettings, settings: GenerationSettings): List<ByteArray> =
+    suspend fun generate(baseUrl: String, auth: ConnectionSettings, settings: GenerationSettings,
+                         mode: GenerationMode, sourceImage: ByteArray?, extras: ExtrasSettings): List<ByteArray> =
         withContext(Dispatchers.IO) {
-            val obj = request(baseUrl, auth, "/sdapi/v1/txt2img", settings.toPayload())
-            val images = obj.optJSONArray("images") ?: throw ApiException("Server hat keine Bilder zurückgegeben.")
-            (0 until images.length()).map { index -> decodeImage(images.getString(index)) }
+            val payload: JSONObject
+            val endpoint: String
+            when (mode) {
+                GenerationMode.TXT2IMG -> {
+                    endpoint = "/sdapi/v1/txt2img"
+                    payload = settings.toPayload()
+                }
+                GenerationMode.IMG2IMG -> {
+                    val image = sourceImage ?: throw ApiException("Für img2img zuerst ein Ausgangsbild auswählen.")
+                    endpoint = "/sdapi/v1/img2img"
+                    payload = settings.toPayload()
+                        .put("enable_hr", false)
+                        .put("init_images", JSONArray().put(Base64.encodeToString(image, Base64.NO_WRAP)))
+                        .put("denoising_strength", settings.img2imgDenoising.coerceIn(0f, 1f).toDouble())
+                        .put("include_init_images", false)
+                        .put("resize_mode", 0)
+                }
+                GenerationMode.EXTRAS -> {
+                    val image = sourceImage ?: throw ApiException("Für Extras zuerst ein Bild auswählen.")
+                    endpoint = "/sdapi/v1/extra-single-image"
+                    payload = JSONObject()
+                        .put("image", Base64.encodeToString(image, Base64.NO_WRAP))
+                        .put("upscaler_1", extras.upscaler)
+                        .put("upscaler_2", "None")
+                        .put("extras_upscaler_2_visibility", 0.0)
+                        .put("upscaling_resize", extras.scale.coerceIn(1f, 4f).toDouble())
+                        .put("upscaling_resize_w", 0).put("upscaling_resize_h", 0)
+                        .put("upscaling_crop", false)
+                        .put("gfpgan_visibility", extras.gfpgan.coerceIn(0f, 1f).toDouble())
+                        .put("codeformer_visibility", extras.codeformer.coerceIn(0f, 1f).toDouble())
+                        .put("codeformer_weight", extras.codeformerWeight.coerceIn(0f, 1f).toDouble())
+                }
+            }
+            val result = request(baseUrl, auth, endpoint, payload)
+            if (mode == GenerationMode.EXTRAS) {
+                val encoded = result.optString("image")
+                if (encoded.isBlank()) throw ApiException("Extras hat kein Bild zurückgegeben.")
+                listOf(decodeImage(encoded))
+            } else {
+                val images = result.optJSONArray("images")
+                    ?: throw ApiException("Server hat keine Bilder zurückgegeben.")
+                (0 until images.length()).map { index -> decodeImage(images.getString(index)) }
+            }
         }
 
     suspend fun progress(baseUrl: String, auth: ConnectionSettings, withImage: Boolean): Progress = withContext(Dispatchers.IO) {
@@ -158,8 +203,8 @@ class A1111Api {
                 .getOrDefault(false)
         }
 
-    suspend fun lastPcParameters(baseUrl: String, auth: ConnectionSettings): JSONObject =
-        withContext(Dispatchers.IO) { request(baseUrl, auth, "/sd-remote/v1/last") }
+    suspend fun lastPcParameters(baseUrl: String, auth: ConnectionSettings, mode: GenerationMode): JSONObject =
+        withContext(Dispatchers.IO) { request(baseUrl, auth, "/sd-remote/v1/last?mode=${mode.name.lowercase()}") }
 
     suspend fun pcImages(baseUrl: String, auth: ConnectionSettings): List<PcImage> =
         withContext(Dispatchers.IO) {
