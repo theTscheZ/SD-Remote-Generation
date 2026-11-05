@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.a1111remote.app.data.A1111Api
+import com.a1111remote.app.GenerationStatusService
 import com.a1111remote.app.data.PcImage
 import com.a1111remote.app.data.SecureStore
 import com.a1111remote.app.data.ServerOptions
@@ -45,6 +46,7 @@ data class UiState(
     val options: ServerOptions? = null,
     val isConnecting: Boolean = false,
     val isGenerating: Boolean = false,
+    val remoteGenerating: Boolean = false,
     val progress: Float = 0f,
     val preview: Bitmap? = null,
     val generated: List<Bitmap> = emptyList(),
@@ -67,11 +69,12 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         private set
 
     private var progressJob: Job? = null
+    private var remotePollJob: Job? = null
     private var generationJob: Job? = null
     private val loadingThumbs = mutableSetOf<String>()
     private var sourceBytes: ByteArray? = null
 
-    init { refreshGallery() }
+    init { refreshGallery(); connect() }
 
     fun editConnection(transform: (ConnectionSettings) -> ConnectionSettings) {
         val updated = transform(state.connection)
@@ -86,7 +89,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectMode(mode: GenerationMode) {
-        if (state.isGenerating || state.mode == mode) return
+        if (state.isGenerating || state.remoteGenerating || state.mode == mode) return
         store.saveMode(mode)
         state = state.copy(mode = mode,
             settings = store.generation(mode),
@@ -158,6 +161,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                         isConnecting = false, bridgeAvailable = bridge,
                         message = if (bridge) "Verbunden: $connected" else "Verbunden: $connected · PC-Verlauf benötigt die Erweiterung.")
                     established = true
+                    refreshRemoteStatus()
                     break
                 } catch (e: Exception) {
                     lastError = e.message ?: "Verbindung fehlgeschlagen."
@@ -168,8 +172,38 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Called on activity resume, connection, and after a locally interrupted request. */
+    fun refreshRemoteStatus() {
+        if (state.connectedUrl.isBlank() || state.isGenerating) return
+        remotePollJob?.cancel()
+        remotePollJob = viewModelScope.launch {
+            var lastSeenActive = state.remoteGenerating
+            var pollIndex = 0
+            do {
+                val response = runCatching {
+                    api.progress(state.connectedUrl, state.connection, withImage = (++pollIndex % 3 == 0))
+                }.getOrNull() ?: break
+                if (state.isGenerating) break
+                state = state.copy(
+                    remoteGenerating = response.remoteActive,
+                    progress = response.fraction,
+                    preview = response.currentImage?.let(::decodeBitmap) ?: state.preview
+                )
+                if (!response.remoteActive) {
+                    if (lastSeenActive) {
+                        state = state.copy(message = "PC-Auftrag abgeschlossen. Ergebnisse in der PC-Galerie prüfen.")
+                        refreshPcGallery()
+                    }
+                    break
+                }
+                lastSeenActive = true
+                delay(1800)
+            } while (!state.isGenerating && state.connectedUrl.isNotBlank())
+        }
+    }
+
     fun generate() {
-        if (state.isGenerating) return
+        if (state.isGenerating || state.remoteGenerating) return
         if (state.connectedUrl.isBlank()) {
             state = state.copy(message = "Zuerst unter Verbindung den PC verbinden.")
             return
@@ -178,6 +212,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             state = state.copy(message = "Zuerst ein Ausgangsbild auswählen.")
             return
         }
+        remotePollJob?.cancel()
         generationJob = viewModelScope.launch {
             val mode = state.mode
             val source = sourceBytes
@@ -185,8 +220,13 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             val url = state.connectedUrl
             val credentials = state.connection
             val settings = state.settings
-            state = state.copy(isGenerating = true, generated = emptyList(), preview = null,
+            state = state.copy(isGenerating = true, remoteGenerating = false,
+                generated = emptyList(), preview = null,
                 progress = 0f, message = "Generierung läuft …")
+            val app = getApplication<Application>()
+            val serviceStarted = runCatching {
+                GenerationStatusService.start(app, mode.name.lowercase())
+            }.isSuccess
             progressJob?.cancel()
             if (mode != GenerationMode.EXTRAS) progressJob = launch {
                 var poll = 0
@@ -197,6 +237,9 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                         .onSuccess { progress ->
                             state = state.copy(progress = progress.fraction,
                                 preview = progress.currentImage?.let(::decodeBitmap) ?: state.preview)
+                            if (serviceStarted) runCatching {
+                                GenerationStatusService.update(app, progress.fraction)
+                            }
                         }
                 }
             }
@@ -212,13 +255,14 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 state = state.copy(message = "Generierung fehlgeschlagen: ${e.message ?: "Unbekannter Fehler"}")
             } finally {
                 progressJob?.cancel()
+                if (serviceStarted) runCatching { GenerationStatusService.finish(app) }
                 state = state.copy(isGenerating = false)
             }
         }
     }
 
     fun interrupt() {
-        if (!state.isGenerating) return
+        if (!state.isGenerating && !state.remoteGenerating) return
         viewModelScope.launch {
             try {
                 api.interrupt(state.connectedUrl, state.connection)
@@ -230,7 +274,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun skip() {
-        if (!state.isGenerating) return
+        if (!state.isGenerating && !state.remoteGenerating) return
         viewModelScope.launch {
             try {
                 api.skip(state.connectedUrl, state.connection)
