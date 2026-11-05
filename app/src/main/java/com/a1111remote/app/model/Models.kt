@@ -90,6 +90,7 @@ data class GenerationSettings(
     val cfgScale: Float = 7f,
     val seed: Long = -1,
     val batchSize: Int = 1,
+    val batchCount: Int = 1,
     val hiresEnabled: Boolean = false,
     val hiresScale: Float = 1.5f,
     val hiresDenoising: Float = 0.4f,
@@ -109,6 +110,7 @@ data class GenerationSettings(
             .put("height", height.coerceIn(64, 2048))
             .put("seed", seed)
             .put("batch_size", batchSize.coerceIn(1, 8))
+            .put("n_iter", batchCount.coerceIn(1, 100))
             .put("send_images", true)
             .put("save_images", true)
             .put("enable_hr", hiresEnabled)
@@ -141,6 +143,7 @@ data class GenerationSettings(
         .put("cfgScale", cfgScale.toDouble())
         .put("seed", seed)
         .put("batchSize", batchSize)
+        .put("batchCount", batchCount)
         .put("hiresEnabled", hiresEnabled)
         .put("hiresScale", hiresScale.toDouble())
         .put("hiresDenoising", hiresDenoising.toDouble())
@@ -167,6 +170,7 @@ data class GenerationSettings(
                 cfgScale = json.optDouble("cfgScale", 7.0).toFloat(),
                 seed = json.optLong("seed", -1),
                 batchSize = json.optInt("batchSize", 1),
+                batchCount = json.optInt("batchCount", 1),
                 hiresEnabled = json.optBoolean("hiresEnabled", false),
                 hiresScale = json.optDouble("hiresScale", 1.5).toFloat(),
                 hiresDenoising = json.optDouble("hiresDenoising", 0.4).toFloat(),
