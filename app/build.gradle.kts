@@ -17,8 +17,27 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // The signing key is restored from encrypted GitHub Actions secrets.
+    // Never publish the PKCS12 file or credentials to this repository.
+    val signingPath = System.getenv("A1111_SIGNING_P12_PATH")
+    val signingPassword = System.getenv("A1111_SIGNING_PASSWORD")
+    val hasStableSigning = !signingPath.isNullOrBlank() && !signingPassword.isNullOrBlank()
+    signingConfigs {
+        if (hasStableSigning) {
+            create("stable") {
+                storeFile = file(signingPath!!)
+                storePassword = signingPassword
+                keyAlias = "a1111remote"
+                keyPassword = signingPassword
+                storeType = "pkcs12"
+            }
+        }
+    }
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            if (hasStableSigning) signingConfig = signingConfigs.getByName("stable")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
