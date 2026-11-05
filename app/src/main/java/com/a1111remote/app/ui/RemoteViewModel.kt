@@ -243,12 +243,12 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
 
     /** Tapping an already-selected LoRA removes its complete tag from the prompt. */
-    fun updateAdetailer(index: Int, update: (com.a1111remote.app.model.AdetailerSettings) -> com.a1111remote.app.model.AdetailerSettings) {
+    fun updateAdetailer(index: Int, update: com.a1111remote.app.model.AdetailerSettings.() -> com.a1111remote.app.model.AdetailerSettings) {
         editSettings { old ->
-            if (index == 0) old.copy(adetailer = update(old.adetailer))
+            if (index == 0) old.copy(adetailer = old.adetailer.update())
             else {
                 val extras = old.additionalAdetailers.toMutableList()
-                if (index - 1 in extras.indices) extras[index - 1] = update(extras[index - 1])
+                if (index - 1 in extras.indices) extras[index - 1] = extras[index - 1].update()
                 old.copy(additionalAdetailers = extras)
             }
         }
