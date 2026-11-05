@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      SIGNING_P12_BASE64: ${{ secrets.A1111_SIGNING_P12_BASE64 }}
+      SIGNING_PASSWORD: ${{ secrets.A1111_SIGNING_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,10 +33,30 @@ jobs:
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon --stacktrace
-      - name: Upload installable APK
+      - name: Restore persistent signing identity
+        if: ${{ env.SIGNING_P12_BASE64 != '' && env.SIGNING_PASSWORD != '' }}
+        run: |
+          printf '%s' "$SIGNING_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/a1111-remote.p12"
+          chmod 600 "$RUNNER_TEMP/a1111-remote.p12"
+      - name: Build updateable release APK
+        if: ${{ env.SIGNING_P12_BASE64 != '' && env.SIGNING_PASSWORD != '' }}
+        env:
+          A1111_SIGNING_P12_PATH: ${{ runner.temp }}/a1111-remote.p12
+          A1111_SIGNING_PASSWORD: ${{ secrets.A1111_SIGNING_PASSWORD }}
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+      - name: Upload stable signed APK
+        if: ${{ env.SIGNING_P12_BASE64 != '' && env.SIGNING_PASSWORD != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: A1111Remote-debug-apk
+          name: A1111Remote-STABLE-signed-release
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload temporary debug APK (not updateable)
+        if: ${{ env.SIGNING_P12_BASE64 == '' || env.SIGNING_PASSWORD == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: A1111Remote-TEMPORARY-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
