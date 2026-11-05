@@ -2,11 +2,12 @@
 
 Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted AUTOMATIC1111 Stable Diffusion WebUI** on a Windows PC.
 
-> **Status:** v0.4.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
+> **Status:** v0.5.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
 
 ## Included in v0.1
 
 - LAN and Tailscale endpoint configuration with connection check and fallback
+- PC control: Wi-Fi Wake-on-LAN, authenticated Windows helper to start and stop A1111, and 30-second cancellable Windows shutdown (optional setup)
 - Optional HTTP Basic API authentication (password encrypted using Android Keystore)
 - `txt2img`: positive/negative prompts, steps, CFG, width, height, Batch Count (n_iter), Batch Size, seed, sampler, scheduler, checkpoint
 - Search all LoRAs from the PC using `/sdapi/v1/loras`; tap to add a LoRA tag to the prompt, tap again to remove it
@@ -20,6 +21,22 @@ Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted
 - Locally stored results, thumbnails, image export to Android Pictures
 - Last-used generation settings saved locally
 - Optional PC bridge: restore PC generation parameters by mode from `params.txt` or mode-specific output metadata; browse the 80 most recent images from PC output directories and download originals into the Android photo gallery
+
+## Optional PC Control (v0.5)
+
+The new **PC** tab controls your Windows machine. Setup instructions are in
+[pc-control/README.md](pc-control/README.md). Install and start the separate
+[Windows helper](pc-control/pc_control_helper.py) first, because A1111 cannot
+start itself when it is not running. The helper uses TCP **42001**, separate
+from your A1111 API port. The controller token is encrypted in Android's
+Keystore. Wake-on-LAN requires BIOS/NIC support and the phone on your home
+Wi-Fi network; simply having Tailscale installed cannot wake a powered-off PC.
+Stopping A1111 works only for a process launched by the helper, and Windows
+shutdown requires confirmation.
+
+**Do not forward** the helper's port to the public internet. Limit the Windows
+firewall rule to trusted private LAN/Tailscale connections. The helper is not
+installed on the PC just by updating the Android APK.
 
 ## Install / build
 
@@ -98,7 +115,7 @@ commit a private keystore or its password to this public repository.
 
 ## Stable Android signing and in-place updates
 
-The project's private PKCS12 keystore and credentials are backed up in the owner's private ChatGPT Library folder \`/A1111-Remote\` (NOT in this public repository). Since prior debug APKs were signed with short-lived runner keys, moving to the stable key requires a **one-time uninstall**. Install the stable-key-signed APK v0.3.0 afterward. Following releases (including v0.4.0) must use the same certificate and a higher versionCode to install over it.
+The project's private PKCS12 keystore and credentials are backed up in the owner's private ChatGPT Library folder \`/A1111-Remote\` (NOT in this public repository). Since prior debug APKs were signed with short-lived runner keys, moving to the stable key requires a **one-time uninstall**. Install the stable-key-signed APK v0.3.0 afterward. Following releases (including v0.5.0) must use the same certificate and a higher versionCode to install over it.
 
 To make GitHub Actions produce updateable signed release APKs, the owner must configure 2 repository secrets in **Settings > Secrets and variables > Actions**:
 
