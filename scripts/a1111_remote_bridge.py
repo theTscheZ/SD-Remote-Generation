@@ -105,24 +105,75 @@ def _find_image(identifier):
     return path
 
 
-def _last_parameters():
-    # Same source used by the WebUI 'paste last generation' button.
-    file_path = Path(data_path) / "params.txt"
+def _mode_images(mode):
+    option, default = {
+        "txt2img": ("outdir_txt2img_samples", "txt2img-images"),
+        "img2img": ("outdir_img2img_samples", "img2img-images"),
+        "extras": ("outdir_extras_samples", "extras-images"),
+    }[mode]
+    configured = getattr(shared.opts, option, "") or ""
+    common = getattr(shared.opts, "outdir_samples", "") or ""
+    base = Path(data_path)
+    root = Path(configured or common or (base / "outputs" / default)).expanduser()
+    if not root.is_absolute():
+        root = base / root
+    root = root.resolve()
+    if not root.is_dir():
+        return []
+    newest = []
+    for folder, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = [name for name in dirs if not name.startswith(".")]
+        for name in files:
+            if Path(name).suffix.lower() not in _extensions:
+                continue
+            path = (Path(folder) / name).resolve()
+            try:
+                if path.is_relative_to(root) and path.is_file():
+                    newest.append((path.stat().st_mtime_ns, path))
+            except OSError:
+                continue
+    return [item[1] for item in sorted(newest, reverse=True)[:30]]
+
+
+def _last_parameters(mode: str = "txt2img"):
+    if mode not in ("txt2img", "img2img", "extras"):
+        raise HTTPException(400, "Unsupported mode")
+
+    if mode == "extras":
+        # Extras writes its postprocessing settings into the saved output
+        # metadata, not the global txt2img params.txt. Load only real PC data.
+        for path in _mode_images("extras"):
+            try:
+                with Image.open(path) as img:
+                    info = str(img.info.get("extras") or img.info.get("postprocessing") or "")
+                if not info or "Postprocess upscale" not in info:
+                    continue
+                scale_match = re.search(r"Postprocess upscale by:\\s*([0-9.]+)", info)
+                upscaler_match = re.search(r"Postprocess upscaler:\\s*([^,]+)", info)
+                return {
+                    "scale": float(scale_match.group(1)) if scale_match else 2.0,
+                    "upscaler": upscaler_match.group(1).strip() if upscaler_match else "Lanczos"
+                }
+            except (OSError, ValueError):
+                continue
+        raise HTTPException(404, "No Extras output with saved upscaler metadata on PC")
+
     info = ""
-    if file_path.is_file():
-        info = file_path.read_text(encoding="utf-8", errors="replace").strip()
+    if mode == "txt2img":
+        file_path = Path(data_path) / "params.txt"
+        if file_path.is_file():
+            info = file_path.read_text(encoding="utf-8", errors="replace").strip()
     if not info:
-        for item in _index()["images"]:
-            path = _index()["by_id"][item["id"]]
+        for path in _mode_images(mode):
             try:
                 with Image.open(path) as img:
                     info = str(img.info.get("parameters") or "")
                 if info:
                     break
-            except Exception:
+            except OSError:
                 continue
     if not info:
-        raise HTTPException(404, "No saved generation parameters on PC")
+        raise HTTPException(404, f"No saved {mode} generation parameters on PC")
     try:
         from modules import infotext_utils as paste
     except ImportError:
@@ -148,6 +199,7 @@ def _last_parameters():
         "hires_enabled": "Hires upscale" in parsed or "Hires steps" in parsed,
         "hires_scale": number("Hires upscale", 1.5, float),
         "hires_denoising": number("Denoising strength", 0.4, float),
+        "img2img_denoising": number("Denoising strength", 0.7, float),
     }
 
 
