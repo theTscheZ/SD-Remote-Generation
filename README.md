@@ -58,10 +58,17 @@ existing output files or the WebUI's `params.txt`. This repository therefore
 contains `scripts/a1111_remote_bridge.py`: a **read-only, authenticated**
 AUTOMATIC1111 extension which uses the existing WebUI port, not a second server.
 
-1. Open AUTOMATIC1111 **Extensions → Install from URL**, enter
-   `https://github.com/theTscheZ/SD-Remote-Generation` and install.
-   Alternatively, put the script at
-   `stable-diffusion-webui/extensions/sd-remote-bridge/scripts/a1111_remote_bridge.py`.
+1. Because WebUI is started with `--listen`, extension installs in the WebUI
+   are disabled for security. Install locally instead: open a command prompt in
+   your `stable-diffusion-webui` folder and run:
+
+   ```bat
+   git clone https://github.com/theTscheZ/SD-Remote-Generation extensions/sd-remote-bridge
+   ```
+
+   Alternatively, copy the file `scripts/a1111_remote_bridge.py` from this repo
+   to `stable-diffusion-webui/extensions/sd-remote-bridge/scripts/`.
+   Do **not** enable `--enable-insecure-extension-access`.
 2. Add **both** `--api` and `--api-auth USER:STRONG_PASSWORD` to your existing
    `webui-user.bat` launch flags; keep your existing flags and port.
 3. Restart AUTOMATIC1111. The log should say
