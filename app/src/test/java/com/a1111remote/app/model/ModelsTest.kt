@@ -23,4 +23,30 @@ class ModelsTest {
     @Test fun `adetailer not sent when off`() {
         assertFalse(GenerationSettings().toPayload().has("alwayson_scripts"))
     }
+    @Test fun `adetailer face and hand are independently toggleable`() {
+        val settings = GenerationSettings(
+            adetailer = AdetailerSettings(enabled = true, model = "face_yolov8n.pt"),
+            additionalAdetailers = listOf(AdetailerSettings(enabled = false, model = "hand_yolov8n.pt"))
+        )
+        val args = settings.toPayload().getJSONObject("alwayson_scripts")
+            .getJSONObject("ADetailer").getJSONArray("args")
+        assertEquals(4, args.length())
+        assertTrue(args.getJSONObject(2).getBoolean("ad_tab_enable"))
+        assertFalse(args.getJSONObject(3).getBoolean("ad_tab_enable"))
+        val handOnly = settings.copy(adetailer = settings.adetailer.copy(enabled = false),
+            additionalAdetailers = listOf(settings.additionalAdetailers[0].copy(enabled = true)))
+        val handArgs = handOnly.toPayload().getJSONObject("alwayson_scripts")
+            .getJSONObject("ADetailer").getJSONArray("args")
+        assertFalse(handArgs.getJSONObject(2).getBoolean("ad_tab_enable"))
+        assertTrue(handArgs.getJSONObject(3).getBoolean("ad_tab_enable"))
+        assertEquals(handOnly, GenerationSettings.fromJson(handOnly.toJson()))
+    }
+
+    @Test fun `img2img and Extras settings can be serialized`() {
+        val settings = GenerationSettings(img2imgDenoising = .45f)
+        assertEquals(settings, GenerationSettings.fromJson(settings.toJson()))
+        val extras = ExtrasSettings(upscaler = "Lanczos", scale = 3f, gfpgan = .2f)
+        assertEquals(extras, ExtrasSettings.fromJson(extras.toJson()))
+    }
+
 }
