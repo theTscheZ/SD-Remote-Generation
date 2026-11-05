@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.a1111remote.app.data.A1111Api
+import com.a1111remote.app.data.PcImage
 import com.a1111remote.app.data.SecureStore
 import com.a1111remote.app.data.ServerOptions
 import com.a1111remote.app.model.ConnectionSettings
@@ -41,6 +42,11 @@ data class UiState(
     val preview: Bitmap? = null,
     val generated: List<Bitmap> = emptyList(),
     val gallery: List<LocalImage> = emptyList(),
+    val bridgeAvailable: Boolean = false,
+    val pcImages: List<PcImage> = emptyList(),
+    val pcPreviews: Map<String, Bitmap> = emptyMap(),
+    val isPcLoading: Boolean = false,
+    val isRestoring: Boolean = false,
     val message: String = ""
 )
 
@@ -54,12 +60,13 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     private var progressJob: Job? = null
     private var generationJob: Job? = null
+    private val loadingThumbs = mutableSetOf<String>()
 
     init { refreshGallery() }
 
     fun editConnection(transform: (ConnectionSettings) -> ConnectionSettings) {
         val updated = transform(state.connection)
-        state = state.copy(connection = updated, connectedUrl = "", options = null)
+        state = state.copy(connection = updated, connectedUrl = "", options = null, bridgeAvailable = false, pcImages = emptyList(), pcPreviews = emptyMap())
         store.saveConnection(updated)
     }
 
@@ -80,8 +87,11 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             for (url in urls) {
                 try {
                     val options = api.probe(url, config)
-                    state = state.copy(connectedUrl = A1111Api.normalizePrivateUrl(url), options = options,
-                        isConnecting = false, message = "Verbunden: ${A1111Api.normalizePrivateUrl(url)}")
+                    val connected = A1111Api.normalizePrivateUrl(url)
+                    val bridge = api.bridgeAvailable(connected, config)
+                    state = state.copy(connectedUrl = connected, options = options,
+                        isConnecting = false, bridgeAvailable = bridge,
+                        message = if (bridge) "Verbunden: $connected" else "Verbunden: $connected · PC-Verlauf benötigt die Erweiterung.")
                     established = true
                     break
                 } catch (e: Exception) {
@@ -159,9 +169,138 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun appendLora(name: String, weight: String) {
-        val formatted = weight.toFloatOrNull()?.coerceIn(-5f, 5f) ?: 1f
-        editSettings { it.copy(prompt = (it.prompt.trimEnd() + " <lora:$name:$formatted>").trim()) }
+
+    /** Tapping an already-selected LoRA removes its complete tag from the prompt. */
+    fun toggleLora(name: String, weight: String = "1.0") {
+        val tag = Regex("<lora:([^:>]+):([^>]+)>", RegexOption.IGNORE_CASE)
+        val selected = tag.findAll(state.settings.prompt).any { it.groupValues[1].equals(name, ignoreCase = true) }
+        val value = weight.toFloatOrNull()?.coerceIn(-5f, 5f) ?: 1f
+        editSettings { old ->
+            val prompt = if (selected) {
+                tag.replace(old.prompt) { match ->
+                    if (match.groupValues[1].equals(name, ignoreCase = true)) "" else match.value
+                }.replace(Regex("[ \\t]{2,}"), " ").trim()
+            } else {
+                (old.prompt.trimEnd() + " <lora:$name:$value>").trim()
+            }
+            old.copy(prompt = prompt)
+        }
+    }
+
+    fun restorePcParameters() {
+        if (!state.bridgeAvailable || state.connectedUrl.isBlank() || state.isRestoring) {
+            state = state.copy(message = "Für PC-Parameter die A1111 Remote-Erweiterung am PC installieren.")
+            return
+        }
+        viewModelScope.launch {
+            state = state.copy(isRestoring = true)
+            try {
+                val data = api.lastPcParameters(state.connectedUrl, state.connection)
+                val old = state.settings
+                val checkpoints = state.options?.checkpoints.orEmpty()
+                val model = data.optString("model")
+                val hash = data.optString("model_hash")
+                val checkpoint = checkpoints.firstOrNull {
+                    (model.isNotBlank() && it.contains(model, ignoreCase = true)) ||
+                        (hash.isNotBlank() && it.contains(hash, ignoreCase = true))
+                } ?: old.checkpoint
+                val updated = old.copy(
+                    prompt = data.optString("prompt", old.prompt),
+                    negativePrompt = data.optString("negative_prompt", old.negativePrompt),
+                    steps = data.optInt("steps", old.steps),
+                    cfgScale = data.optDouble("cfg_scale", old.cfgScale.toDouble()).toFloat(),
+                    sampler = data.optString("sampler", old.sampler),
+                    scheduler = data.optString("scheduler", old.scheduler),
+                    seed = data.optLong("seed", old.seed),
+                    width = data.optInt("width", old.width),
+                    height = data.optInt("height", old.height),
+                    checkpoint = checkpoint,
+                    hiresEnabled = data.optBoolean("hires_enabled", old.hiresEnabled),
+                    hiresScale = data.optDouble("hires_scale", old.hiresScale.toDouble()).toFloat(),
+                    hiresDenoising = data.optDouble("hires_denoising", old.hiresDenoising.toDouble()).toFloat()
+                )
+                editSettings { updated }
+                state = state.copy(message = "Letzte Generierungsparameter vom PC übernommen.")
+            } catch (error: Exception) {
+                state = state.copy(message = "PC-Parameter konnten nicht geladen werden: ${error.message}")
+            } finally {
+                state = state.copy(isRestoring = false)
+            }
+        }
+    }
+
+    fun refreshPcGallery() {
+        if (!state.bridgeAvailable || state.connectedUrl.isBlank()) {
+            state = state.copy(pcImages = emptyList(), isPcLoading = false)
+            return
+        }
+        viewModelScope.launch {
+            state = state.copy(isPcLoading = true)
+            try {
+                val images = api.pcImages(state.connectedUrl, state.connection)
+                val ids = images.map { it.id }.toSet()
+                state = state.copy(pcImages = images,
+                    pcPreviews = state.pcPreviews.filterKeys { it in ids })
+            } catch (error: Exception) {
+                state = state.copy(message = "PC-Bilder konnten nicht geladen werden: ${error.message}")
+            } finally {
+                state = state.copy(isPcLoading = false)
+            }
+        }
+    }
+
+    fun loadPcThumbnail(image: PcImage) {
+        if (image.id in state.pcPreviews || !loadingThumbs.add(image.id) || !state.bridgeAvailable) return
+        viewModelScope.launch {
+            try {
+                val bytes = api.pcThumbnail(state.connectedUrl, state.connection, image.id)
+                decodeBitmap(bytes)?.let { bitmap ->
+                    state = state.copy(pcPreviews = state.pcPreviews + (image.id to bitmap))
+                }
+            } catch (_: Exception) {
+                // Individual thumbnail failures should not hide the rest of the gallery.
+            } finally {
+                loadingThumbs.remove(image.id)
+            }
+        }
+    }
+
+    fun downloadPcImage(image: PcImage) {
+        if (!state.bridgeAvailable) return
+        viewModelScope.launch {
+            state = state.copy(message = "Lade ${image.name} vom PC …")
+            try {
+                val bytes = api.pcImageDownload(state.connectedUrl, state.connection, image.id)
+                withContext(Dispatchers.IO) {
+                    val resolver = getApplication<Application>().contentResolver
+                    val suffix = image.name.substringAfterLast('.', "png").lowercase()
+                    val mime = when (suffix) {
+                        "jpg", "jpeg" -> "image/jpeg"
+                        "webp" -> "image/webp"
+                        else -> "image/png"
+                    }
+                    val values = ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, image.name)
+                        put(MediaStore.Images.Media.MIME_TYPE, mime)
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/A1111 Remote")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                        ?: throw IOException("Kann Bild nicht in der Handy-Galerie speichern.")
+                    try {
+                        resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                            ?: throw IOException("Speichern fehlgeschlagen.")
+                        resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+                    } catch (error: Exception) {
+                        resolver.delete(uri, null, null)
+                        throw error
+                    }
+                }
+                state = state.copy(message = "Bild vom PC in Bilder/A1111 Remote gespeichert.")
+            } catch (error: Exception) {
+                state = state.copy(message = "Download fehlgeschlagen: ${error.message}")
+            }
+        }
     }
 
     private fun decodeBitmap(bytes: ByteArray): Bitmap? =
