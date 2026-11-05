@@ -3,6 +3,31 @@ package com.a1111remote.app.model
 import org.json.JSONArray
 import org.json.JSONObject
 
+enum class GenerationMode { TXT2IMG, IMG2IMG, EXTRAS }
+
+/** Extras is post-processing, not diffusion generation. */
+data class ExtrasSettings(
+    val upscaler: String = "Lanczos",
+    val scale: Float = 2f,
+    val gfpgan: Float = 0f,
+    val codeformer: Float = 0f,
+    val codeformerWeight: Float = 0.5f
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("upscaler", upscaler).put("scale", scale)
+        .put("gfpgan", gfpgan).put("codeformer", codeformer)
+        .put("codeformerWeight", codeformerWeight)
+    companion object {
+        fun fromJson(o: JSONObject) = ExtrasSettings(
+            upscaler = o.optString("upscaler", "Lanczos"),
+            scale = o.optDouble("scale", 2.0).toFloat(),
+            gfpgan = o.optDouble("gfpgan", 0.0).toFloat(),
+            codeformer = o.optDouble("codeformer", 0.0).toFloat(),
+            codeformerWeight = o.optDouble("codeformerWeight", 0.5).toFloat()
+        )
+    }
+}
+
 /** Simple runtime configuration; the password is saved separately in Android Keystore. */
 data class ConnectionSettings(
     val lanUrl: String = "http://192.168.1.100:7860",
@@ -25,7 +50,7 @@ data class AdetailerSettings(
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("ad_model", model.trim())
-        .put("ad_tab_enable", true)
+        .put("ad_tab_enable", enabled)
         .put("ad_prompt", prompt)
         .put("ad_negative_prompt", negativePrompt)
         .put("ad_confidence", confidence.toDouble())
@@ -34,6 +59,23 @@ data class AdetailerSettings(
         .put("ad_inpaint_only_masked_padding", padding)
         .put("ad_dilate_erode", dilation)
         .put("ad_inpaint_only_masked", onlyMasked)
+    fun toStoredJson(): JSONObject = JSONObject()
+        .put("enabled", enabled).put("model", model)
+        .put("prompt", prompt).put("negativePrompt", negativePrompt)
+        .put("confidence", confidence.toDouble()).put("denoising", denoising.toDouble())
+        .put("maskBlur", maskBlur).put("padding", padding)
+        .put("dilation", dilation).put("onlyMasked", onlyMasked)
+    companion object {
+        fun fromStoredJson(a: JSONObject) = AdetailerSettings(
+            enabled = a.optBoolean("enabled", false),
+            model = a.optString("model", "face_yolov8n.pt"),
+            prompt = a.optString("prompt"), negativePrompt = a.optString("negativePrompt"),
+            confidence = a.optDouble("confidence", 0.3).toFloat(),
+            denoising = a.optDouble("denoising", 0.4).toFloat(),
+            maskBlur = a.optInt("maskBlur", 4), padding = a.optInt("padding", 32),
+            dilation = a.optInt("dilation", 4), onlyMasked = a.optBoolean("onlyMasked", true)
+        )
+    }
 }
 
 data class GenerationSettings(
@@ -51,7 +93,9 @@ data class GenerationSettings(
     val hiresEnabled: Boolean = false,
     val hiresScale: Float = 1.5f,
     val hiresDenoising: Float = 0.4f,
-    val adetailer: AdetailerSettings = AdetailerSettings()
+    val adetailer: AdetailerSettings = AdetailerSettings(),
+    val additionalAdetailers: List<AdetailerSettings> = listOf(AdetailerSettings(model = "hand_yolov8n.pt")),
+    val img2imgDenoising: Float = 0.7f
 ) {
     fun toPayload(): JSONObject {
         val o = JSONObject()
@@ -75,9 +119,11 @@ data class GenerationSettings(
         if (checkpoint.isNotBlank()) {
             o.put("override_settings", JSONObject().put("sd_model_checkpoint", checkpoint))
         }
-        if (adetailer.enabled) {
-            // Current Bing-su ADetailer API: true = enabled, false = do not skip img2img.
-            val args = JSONArray().put(true).put(false).put(adetailer.toJson())
+        val units = listOf(adetailer) + additionalAdetailers
+        if (units.any { it.enabled }) {
+            // API: global enabled flag, skip_img2img, then each independently enabled tab.
+            val args = JSONArray().put(true).put(false)
+            units.forEach { args.put(it.toJson()) }
             o.put("alwayson_scripts", JSONObject().put("ADetailer", JSONObject().put("args", args)))
         }
         return o
@@ -98,22 +144,17 @@ data class GenerationSettings(
         .put("hiresEnabled", hiresEnabled)
         .put("hiresScale", hiresScale.toDouble())
         .put("hiresDenoising", hiresDenoising.toDouble())
-        .put("adetailer", JSONObject()
-            .put("enabled", adetailer.enabled)
-            .put("model", adetailer.model)
-            .put("prompt", adetailer.prompt)
-            .put("negativePrompt", adetailer.negativePrompt)
-            .put("confidence", adetailer.confidence.toDouble())
-            .put("denoising", adetailer.denoising.toDouble())
-            .put("maskBlur", adetailer.maskBlur)
-            .put("padding", adetailer.padding)
-            .put("dilation", adetailer.dilation)
-            .put("onlyMasked", adetailer.onlyMasked)
-        )
+        .put("img2imgDenoising", img2imgDenoising.toDouble())
+        .put("additionalAdetailers", JSONArray().apply { additionalAdetailers.forEach { put(it.toStoredJson()) } })
+        .put("adetailer", adetailer.toStoredJson())
 
     companion object {
         fun fromJson(json: JSONObject): GenerationSettings {
             val a = json.optJSONObject("adetailer") ?: JSONObject()
+            val extras = json.optJSONArray("additionalAdetailers")
+            val additional = if (extras != null) (0 until extras.length())
+                .mapNotNull { extras.optJSONObject(it)?.let(AdetailerSettings::fromStoredJson) }
+            else listOf(AdetailerSettings(model = "hand_yolov8n.pt"))
             return GenerationSettings(
                 prompt = json.optString("prompt"),
                 negativePrompt = json.optString("negativePrompt"),
@@ -129,18 +170,9 @@ data class GenerationSettings(
                 hiresEnabled = json.optBoolean("hiresEnabled", false),
                 hiresScale = json.optDouble("hiresScale", 1.5).toFloat(),
                 hiresDenoising = json.optDouble("hiresDenoising", 0.4).toFloat(),
-                adetailer = AdetailerSettings(
-                    enabled = a.optBoolean("enabled", false),
-                    model = a.optString("model", "face_yolov8n.pt"),
-                    prompt = a.optString("prompt"),
-                    negativePrompt = a.optString("negativePrompt"),
-                    confidence = a.optDouble("confidence", 0.3).toFloat(),
-                    denoising = a.optDouble("denoising", 0.4).toFloat(),
-                    maskBlur = a.optInt("maskBlur", 4),
-                    padding = a.optInt("padding", 32),
-                    dilation = a.optInt("dilation", 4),
-                    onlyMasked = a.optBoolean("onlyMasked", true)
-                )
+                img2imgDenoising = json.optDouble("img2imgDenoising", 0.7).toFloat(),
+                additionalAdetailers = additional,
+                adetailer = AdetailerSettings.fromStoredJson(a)
             )
         }
     }
