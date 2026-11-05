@@ -2,17 +2,20 @@
 
 Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted AUTOMATIC1111 Stable Diffusion WebUI** on a Windows PC.
 
-> **Status:** v0.3.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
+> **Status:** v0.4.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
 
 ## Included in v0.1
 
 - LAN and Tailscale endpoint configuration with connection check and fallback
 - Optional HTTP Basic API authentication (password encrypted using Android Keystore)
-- `txt2img`: positive/negative prompts, steps, CFG, width, height, batch, seed, sampler, scheduler, checkpoint
+- `txt2img`: positive/negative prompts, steps, CFG, width, height, Batch Count (n_iter), Batch Size, seed, sampler, scheduler, checkpoint
 - Search all LoRAs from the PC using `/sdapi/v1/loras`; tap to add a LoRA tag to the prompt, tap again to remove it
 - txt2img, img2img (with image selection and denoising), and Extras (upscaling and restoration) workflows
 - Hires. Fix scale and denoising
 - ADetailer: independently toggleable Face and Hand tabs, plus optional additional tabs; detector, prompts, confidence, denoising, mask blur, padding, mask erosion/dilation
+- Global Generate/Interrupt button and progress bar in toolbar across all tabs
+- Batch Count (n_iter) and Batch Size (batch_size) separately, with total image count
+- Foreground service while generating, with Android notification progress during background use; resumed app rechecks current PC progress (Android notification permission requested on first run)
 - Progress bar, intermittent live preview, interrupt/skip
 - Locally stored results, thumbnails, image export to Android Pictures
 - Last-used generation settings saved locally
@@ -95,7 +98,7 @@ commit a private keystore or its password to this public repository.
 
 ## Stable Android signing and in-place updates
 
-The project's private PKCS12 keystore and credentials are backed up in the owner's private ChatGPT Library folder \`/A1111-Remote\` (NOT in this public repository). Since prior debug APKs were signed with short-lived runner keys, moving to the stable key requires a **one-time uninstall**. Install the stable-key-signed APK v0.3.0 afterward. Following releases must use the same certificate and a higher versionCode to install over it.
+The project's private PKCS12 keystore and credentials are backed up in the owner's private ChatGPT Library folder \`/A1111-Remote\` (NOT in this public repository). Since prior debug APKs were signed with short-lived runner keys, moving to the stable key requires a **one-time uninstall**. Install the stable-key-signed APK v0.3.0 afterward. Following releases (including v0.4.0) must use the same certificate and a higher versionCode to install over it.
 
 To make GitHub Actions produce updateable signed release APKs, the owner must configure 2 repository secrets in **Settings > Secrets and variables > Actions**:
 
@@ -103,6 +106,21 @@ To make GitHub Actions produce updateable signed release APKs, the owner must co
 - \`A1111_SIGNING_PASSWORD\`: password from the private \`signing-credentials.txt\`.
 
 After that, download the \`A1111Remote-STABLE-signed-release\` GitHub Actions artifact. Without configured secrets CI outputs only a clearly marked, **non-updateable** temporary debug APK. Never commit a private signing keystore or password to this public repository.
+
+## Progress and background behavior
+
+Starting a generation from either the toolbar or the screen starts an Android
+data-sync foreground service. It displays a notification with generation progress
+while the Activity is minimized. Switching between the app's tabs never interrupts
+the job. When the app resumes or reconnects, it inspects `/sdapi/v1/progress`
+for an active job on the PC, so status can be picked up again even after a process
+restart.
+
+**Limitation:** Android can terminate the entire process under exceptional
+conditions, and the service is not guaranteed to survive a force-stop. If that
+happens, the original HTTP generation response is no longer attached; the PC
+can still complete its job, and its saved results can be downloaded via the
+PC Gallery after reconnecting. Do not assume the app can recreate a lost response.
 
 ## PC parameter recovery by mode
 
