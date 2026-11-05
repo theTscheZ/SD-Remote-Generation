@@ -124,7 +124,12 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             state = state.copy(pcControlBusy = true, pcControlMessage = "Befehl wird gesendet …")
             try {
                 val message = pcControl.action(state.connection, state.pcControllerToken, action)
-                state = state.copy(pcControlMessage = message)
+                state = state.copy(
+                    pcControlMessage = message,
+                    pcControllerStatus = if (action == "shutdown")
+                        state.pcControllerStatus?.copy(shutdownPending = true)
+                    else state.pcControllerStatus
+                )
                 if (action != "shutdown") {
                     val status = runCatching {
                         pcControl.status(state.connection, state.pcControllerToken)
