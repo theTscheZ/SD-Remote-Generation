@@ -1,5 +1,8 @@
 package com.a1111remote.app
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -22,6 +25,8 @@ import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
@@ -29,6 +34,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -38,6 +44,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.a1111remote.app.model.AdetailerSettings
 import com.a1111remote.app.model.GenerationSettings
 import com.a1111remote.app.model.GenerationMode
@@ -68,18 +77,71 @@ class MainActivity : ComponentActivity() {
 private fun RemoteApp(vm: RemoteViewModel) {
     val state = vm.state
     var screen by remember { mutableStateOf(Screen.GENERATE) }
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, vm) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) vm.refreshRemoteStatus()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    var notificationPermissionAsked by remember { mutableStateOf(false) }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { vm.generate() }
+    val startGeneration: () -> Unit = {
+        if (state.connectedUrl.isBlank()) {
+            screen = Screen.CONNECTION
+        } else if (Build.VERSION.SDK_INT >= 33 &&
+            !notificationPermissionAsked &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionAsked = true
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            vm.generate()
+        }
+    }
     Scaffold(
         topBar = {
             // Keep the custom toolbar below the Android status bar on edge-to-edge devices.
             // Scaffold propagates this adjusted toolbar height to the screen content.
             Surface(modifier = Modifier.statusBarsPadding(), color = MaterialTheme.colorScheme.surface) {
-                Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Bolt, null, tint = accent)
-                    Spacer(Modifier.width(8.dp))
-                    Text("A1111 Remote", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.weight(1f))
-                    Icon(if (state.connectedUrl.isNotEmpty()) Icons.Default.CheckCircle else Icons.Default.CloudOff,
-                        null, tint = if (state.connectedUrl.isNotEmpty()) Color(0xFF80D4AE) else MaterialTheme.colorScheme.outline)
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Bolt, null, tint = accent)
+                        Spacer(Modifier.width(8.dp))
+                        Text("A1111 Remote", style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.weight(1f))
+                        val running = state.isGenerating || state.remoteGenerating
+                        if (running) {
+                            Text("${(state.progress * 100).toInt()} %",
+                                style = MaterialTheme.typography.labelMedium)
+                            IconButton(onClick = vm::interrupt) {
+                                Icon(Icons.Default.Stop, contentDescription = "Generierung stoppen")
+                            }
+                        } else {
+                            IconButton(onClick = startGeneration,
+                                enabled = state.connectedUrl.isNotBlank()) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = "Generate starten",
+                                    tint = accent)
+                            }
+                        }
+                        Icon(if (state.connectedUrl.isNotEmpty()) Icons.Default.CheckCircle
+                            else Icons.Default.CloudOff,
+                            contentDescription = if (state.connectedUrl.isNotEmpty()) "Verbunden" else "Offline",
+                            tint = if (state.connectedUrl.isNotEmpty()) Color(0xFF80D4AE)
+                                else MaterialTheme.colorScheme.outline)
+                    }
+                    if (state.isGenerating || state.remoteGenerating) {
+                        LinearProgressIndicator(progress = { state.progress },
+                            modifier = Modifier.fillMaxWidth())
+                    }
                 }
             }
         },
@@ -97,7 +159,7 @@ private fun RemoteApp(vm: RemoteViewModel) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
             }
             when (screen) {
-                Screen.GENERATE -> GenerateScreen(state, vm, onOpenConnection = { screen = Screen.CONNECTION })
+                Screen.GENERATE -> GenerateScreen(state, vm, onOpenConnection = { screen = Screen.CONNECTION }, onGenerate = startGeneration)
                 Screen.GALLERY -> GalleryScreen(state, vm)
                 Screen.CONNECTION -> ConnectionScreen(state, vm)
             }
@@ -106,7 +168,7 @@ private fun RemoteApp(vm: RemoteViewModel) {
 }
 
 @Composable
-private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection: () -> Unit) {
+private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection: () -> Unit, onGenerate: () -> Unit) {
     val current = state.settings
     val mode = state.mode
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -124,7 +186,7 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
                     selected = mode == option,
                     onClick = { vm.selectMode(option) },
                     label = { Text(label) },
-                    enabled = !state.isGenerating,
+                    enabled = !state.isGenerating && !state.remoteGenerating,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -184,10 +246,28 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
                     NumberInput("Breite", current.width.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(width = value) } } }
                     NumberInput("Höhe", current.height.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(height = value) } } }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NumberInput("Seed (-1 = zufällig)", current.seed.toString(), Modifier.weight(2f), KeyboardType.Number) { it.toLongOrNull()?.let { value -> vm.editSettings { s -> s.copy(seed = value) } } }
-                    NumberInput("Batch", current.batchSize.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(batchSize = value) } } }
+                NumberInput("Seed (-1 = zufällig)", current.seed.toString(),
+                    Modifier.fillMaxWidth(), KeyboardType.Number) { input ->
+                    input.toLongOrNull()?.let { value -> vm.editSettings { it.copy(seed = value) } }
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    NumberInput("Batch Count", current.batchCount.toString(),
+                        Modifier.weight(1f), KeyboardType.Number) { input ->
+                        input.toIntOrNull()?.let { value ->
+                            vm.editSettings { it.copy(batchCount = value.coerceIn(1, 100)) }
+                        }
+                    }
+                    NumberInput("Batch Size", current.batchSize.toString(),
+                        Modifier.weight(1f), KeyboardType.Number) { input ->
+                        input.toIntOrNull()?.let { value ->
+                            vm.editSettings { it.copy(batchSize = value.coerceIn(1, 8)) }
+                        }
+                    }
+                }
+                Text("Gesamt: ${current.batchCount * current.batchSize} Bilder · " +
+                    "${current.batchCount} Durchläufe × ${current.batchSize} Bilder",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary)
                 Choice("Checkpoint", current.checkpoint.ifBlank { state.options?.activeCheckpoint.orEmpty() }, state.options?.checkpoints.orEmpty(), Modifier.fillMaxWidth()) { value -> vm.editSettings { it.copy(checkpoint = value) } }
                 LoraPicker(state, vm)
             }
@@ -253,7 +333,7 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
 
         }
 
-        if (state.isGenerating) {
+        if (state.isGenerating || state.remoteGenerating) {
             LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth())
             Text("${(state.progress * 100).toInt()} %", style = MaterialTheme.typography.labelMedium)
             state.preview?.let { bitmap ->
@@ -264,8 +344,9 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
                 OutlinedButton(onClick = vm::skip, modifier = Modifier.weight(1f)) { Text("Skip") }
             }
         } else {
-            Button(onClick = vm::generate,
+            Button(onClick = onGenerate,
                 enabled = state.connectedUrl.isNotEmpty() &&
+                    !state.remoteGenerating &&
                     (mode == GenerationMode.TXT2IMG || state.sourcePreview != null),
                 modifier = Modifier.fillMaxWidth().height(52.dp)) {
                 Text(if (mode == GenerationMode.EXTRAS) "Bild verarbeiten" else "Generate",
