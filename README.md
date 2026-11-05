@@ -2,19 +2,20 @@
 
 Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted AUTOMATIC1111 Stable Diffusion WebUI** on a Windows PC.
 
-> **Status:** v0.1.0 early prototype. App and API payload are implemented; compatibility with your particular AUTOMATIC1111/ADetailer versions still needs an on-device test. Older images from the PC output folders are not synced yet. The app has not been tested against a running PC here.
+> **Status:** v0.2.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
 
 ## Included in v0.1
 
 - LAN and Tailscale endpoint configuration with connection check and fallback
 - Optional HTTP Basic API authentication (password encrypted using Android Keystore)
 - `txt2img`: positive/negative prompts, steps, CFG, width, height, batch, seed, sampler, scheduler, checkpoint
-- LoRA list and add-to-prompt action
+- Search all LoRAs from the PC using `/sdapi/v1/loras`; tap to add a LoRA tag to the prompt, tap again to remove it
 - Hires. Fix scale and denoising
 - ADetailer: enabled, detector, prompts, confidence, denoising, mask blur, padding, dilation, masked inpainting; detect installed extension; list detector choices when exposed by `/sdapi/v1/script-info`
 - Progress bar, intermittent live preview, interrupt/skip
 - Locally stored results, thumbnails, image export to Android Pictures
 - Last-used generation settings saved locally
+- Optional PC bridge: paste last PC WebUI generation settings from `params.txt`; browse the 80 most recent images from PC output directories and download originals into the Android photo gallery
 
 ## Install / build
 
@@ -50,6 +51,40 @@ set COMMANDLINE_ARGS=--api --listen --api-auth YOUR_USERNAME:YOUR_STRONG_PASSWOR
 
 **Do not open router ports** or use public A1111 share links for this app. The Android client accepts unencrypted HTTP only with an explicitly configured private IPv4 endpoint; HTTPS endpoints are also supported.
 
+## PC bridge extension (required for PC gallery + last PC parameters)
+
+AUTOMATIC1111's normal `--api` endpoints can list LoRAs, but cannot read arbitrary
+existing output files or the WebUI's `params.txt`. This repository therefore
+contains `scripts/a1111_remote_bridge.py`: a **read-only, authenticated**
+AUTOMATIC1111 extension which uses the existing WebUI port, not a second server.
+
+1. Open AUTOMATIC1111 **Extensions → Install from URL**, enter
+   `https://github.com/theTscheZ/SD-Remote-Generation` and install.
+   Alternatively, put the script at
+   `stable-diffusion-webui/extensions/sd-remote-bridge/scripts/a1111_remote_bridge.py`.
+2. Add **both** `--api` and `--api-auth USER:STRONG_PASSWORD` to your existing
+   `webui-user.bat` launch flags; keep your existing flags and port.
+3. Restart AUTOMATIC1111. The log should say
+   `[A1111 Remote] PC history bridge active`.
+4. In Android, tap **Verbindung testen** again. Then **PC** inside Galerie shows
+   PC images. Tap an image and **Original herunterladen** to save a copy to the
+   phone in `Pictures/A1111 Remote`. The PC originals stay untouched.
+5. In Generate, **Letzte PC-Parameter übernehmen** reads the WebUI's most
+   recently recorded generation settings from `params.txt` (falls back to PNG
+   metadata from an existing output if the file isn't present).
+
+The PC bridge intentionally refuses access when `--api-auth` is missing,
+and it only reads the configured A1111 output directories. It does not
+expose a generic file browser, delete images, or open any new network port.
+As Basic authentication over HTTP is unencrypted, only use it on your
+trusted local network or over Tailscale. Never forward your WebUI port to
+the public internet.
+
+**APK signing:** GitHub Actions currently produces ephemeral debug-signed
+APKs. A stable private release signing keystore must be configured separately
+before Android can reliably install future builds as in-place updates. Never
+commit a private keystore or its password to this public repository.
+
 ## Technical architecture
 
 - Jetpack Compose + Material 3 UI
@@ -61,7 +96,7 @@ set COMMANDLINE_ARGS=--api --listen --api-auth YOUR_USERNAME:YOUR_STRONG_PASSWOR
 ## Next steps
 
 1. Test LAN and Tailscale against the actual AUTOMATIC1111 server/extension versions.
-2. Add remote image history (small PC companion/gallery service), metadata parsing and presets.
+2. Improve PC gallery pagination, image metadata views and presets.
 3. Add img2img/inpainting, multiple ADetailer units, finer-grained extension settings and robust long-job handling.
 
 Sources: [AUTOMATIC1111 API](https://github.com/AUTOMATIC1111/stable-diffusion-webui/wiki/API), [ADetailer REST API](https://github.com/Bing-su/adetailer/wiki/REST-API).
