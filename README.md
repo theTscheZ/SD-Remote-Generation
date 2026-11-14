@@ -46,14 +46,17 @@ installed on the PC just by updating the Android APK.
   firewall or network routing: if Tailscale itself makes the LAN IP
   unreachable, check Windows' network profile and inbound rules for the A1111
   port, Tailscale exit-node LAN access and any subnet route overlaps.
-- **Keep the PC awake while generating**: install the updated
+- **Keep Windows awake for the entire A1111 session**: install the updated
   `scripts/a1111_remote_bridge.py` on the Windows PC and restart A1111.
-  While A1111 reports an active generation job, the bridge requests that
-  Windows not automatically suspend. It releases the request when the
-  generation finishes, so normal idle sleep remains possible afterward.
-  It cannot prevent intentional Sleep, forced shutdown, closing a laptop lid,
-  or unsupported sleep behavior, and it is inactive unless the updated bridge
-  is running. The Android app alone cannot reliably prevent Windows sleep.
+  The bridge requests that Windows not automatically suspend while A1111 is
+  running, **including time between generations**. When A1111 exits, the
+  Windows power request goes away and normal idle sleep can resume.
+  The A1111 console prints `Windows automatic sleep prevention ACTIVE`
+  after successful registration. During A1111 uptime, `powercfg /requests`
+  should show a SYSTEM request from its Python process.
+  The display may still power off; deliberate Sleep, lid-close and system
+  shutdown remain possible. Windows policy may override power requests.
+  The Android app alone cannot reliably prevent Windows sleep.
 
 ## Generation layout and PC-parameter restoration (v0.6)
 
