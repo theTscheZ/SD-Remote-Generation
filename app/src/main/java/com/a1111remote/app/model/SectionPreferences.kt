@@ -1,0 +1,59 @@
+package com.a1111remote.app.model
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** Section order and expansion presets are independent of generation parameters. */
+data class SectionPreferences(
+    val order: List<String> = KEYS,
+    val defaultExpanded: Map<String, Boolean> = KEYS.associateWith { it != "adetailer" },
+    val defaultEnabled: Map<String, Boolean> = mapOf("hires" to false, "adetailer" to false)
+) {
+    companion object {
+        val KEYS = listOf("generation", "hires", "img2img", "adetailer", "extras")
+        val LABELS = mapOf(
+            "generation" to "Generierung",
+            "hires" to "Hires. Fix",
+            "img2img" to "img2img",
+            "adetailer" to "ADetailer",
+            "extras" to "Extras"
+        )
+
+        fun fromJson(source: JSONObject): SectionPreferences {
+            val savedOrder = source.optJSONArray("order")
+            val ordered = if (savedOrder == null) emptyList() else
+                (0 until savedOrder.length()).map { savedOrder.optString(it) }
+                    .filter { it in KEYS }.distinct()
+            val expandedJson = source.optJSONObject("defaultExpanded") ?: JSONObject()
+            val enabledJson = source.optJSONObject("defaultEnabled") ?: JSONObject()
+            val defaults = SectionPreferences()
+            return SectionPreferences(
+                order = (ordered + KEYS).distinct(),
+                defaultExpanded = KEYS.associateWith { key ->
+                    expandedJson.optBoolean(key, defaults.defaultExpanded[key] ?: true)
+                },
+                defaultEnabled = listOf("hires", "adetailer").associateWith { key ->
+                    enabledJson.optBoolean(key, false)
+                }
+            )
+        }
+    }
+
+    fun toJson(): JSONObject = JSONObject()
+        .put("order", JSONArray().apply { order.forEach(::put) })
+        .put("defaultExpanded", JSONObject().apply {
+            defaultExpanded.forEach { (key, value) -> put(key, value) }
+        })
+        .put("defaultEnabled", JSONObject().apply {
+            defaultEnabled.forEach { (key, value) -> put(key, value) }
+        })
+
+    fun move(key: String, delta: Int): SectionPreferences {
+        val position = order.indexOf(key)
+        val target = position + delta
+        if (position !in order.indices || target !in order.indices) return this
+        val next = order.toMutableList()
+        next.add(target, next.removeAt(position))
+        return copy(order = next)
+    }
+}
