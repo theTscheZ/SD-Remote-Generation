@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -46,8 +48,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import kotlinx.coroutines.flow.drop
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -969,6 +971,12 @@ private fun Choice(label: String, value: String, choices: List<String>, modifier
  * A String-only TextField loses selection context when the VM publishes prompt updates,
  * which can also trigger an unexpected bring-into-view jump in the parent scroll column.
  */
+/**
+ * State-based Material 3 text field keeps selection separate from the UI view model.
+ * Hoist the field's OWN scroll state: the old value-based overload owned its internal
+ * scroll offset, which could jump back to the start after focus left and returned.
+ * Important: do not nest another verticalScroll modifier on this field itself.
+ */
 @Composable
 private fun StableMultilineField(
     id: String,
@@ -979,30 +987,38 @@ private fun StableMultilineField(
     onChanged: (String) -> Unit
 ) {
     key(id) {
-        var field by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-            mutableStateOf(TextFieldValue(value))
-        }
+        val field = rememberTextFieldState(initialText = value)
+        val fieldScroll = rememberScrollState()
+        val latestOnChanged by rememberUpdatedState(onChanged)
+
+        // External changes (e.g. "Letzte PC-Parameter übernehmen") must update
+        // the field without replacing its editor instance or losing the selection.
         LaunchedEffect(value) {
-            if (field.text != value) {
-                field = field.copy(
-                    text = value,
+            if (field.text.toString() != value) {
+                field.edit {
+                    val oldSelection = selection
+                    replace(0, length, value)
                     selection = TextRange(
-                        field.selection.start.coerceIn(0, value.length),
-                        field.selection.end.coerceIn(0, value.length)
+                        oldSelection.start.coerceIn(0, value.length),
+                        oldSelection.end.coerceIn(0, value.length)
                     )
-                )
+                }
             }
         }
+        LaunchedEffect(field) {
+            snapshotFlow { field.text.toString() }
+                .drop(1)
+                .collect { text -> latestOnChanged(text) }
+        }
+
         OutlinedTextField(
-            value = field,
-            onValueChange = { next ->
-                field = next
-                if (next.text != value) onChanged(next.text)
-            },
+            state = field,
+            scrollState = fieldScroll,
+            lineLimits = TextFieldLineLimits.MultiLine(
+                minHeightInLines = minLines, maxHeightInLines = maxLines
+            ),
             label = { Text(label) },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = minLines,
-            maxLines = maxLines
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
