@@ -41,7 +41,7 @@ object PcParameterMapper {
         }
         return previous.copy(
             adetailer = restored.first(),
-            additionalAdetailers = restored.drop(1) + original.drop(restored.size).drop(1)
+            additionalAdetailers = restored.drop(1) + original.drop(restored.size)
         )
     }
 }
