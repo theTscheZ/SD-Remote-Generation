@@ -196,6 +196,18 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         state = state.copy(message = "Aktivierungs-Standards auf diese Generierung angewendet.")
     }
 
+    /** Explicitly select LAN or Tailscale. Never switch the endpoint mid-generation. */
+    fun switchConnectionMode(mode: String) {
+        if (mode !in setOf("auto", "lan", "tailscale")) return
+        if (state.isGenerating || state.remoteGenerating || state.isConnecting) {
+            state = state.copy(message = "Nach der laufenden Generierung die Verbindung wechseln.")
+            return
+        }
+        if (state.connection.connectionMode == mode && state.connectedUrl.isNotBlank()) return
+        editConnection { it.copy(connectionMode = mode) }
+        connect()
+    }
+
     fun editSettings(transform: (GenerationSettings) -> GenerationSettings) {
         val updated = transform(state.settings)
         state = state.copy(settings = updated)
@@ -264,26 +276,33 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             state = state.copy(isConnecting = true, message = "Verbinde …")
             val config = state.connection
-            val urls = listOf(config.lanUrl, config.vpnUrl).filter { it.isNotBlank() }.distinct()
-            var lastError = "Keine Adresse angegeben."
+            val candidates = when (config.connectionMode) {
+                "lan" -> listOf("LAN" to config.lanUrl)
+                "tailscale" -> listOf("Tailscale" to config.vpnUrl)
+                else -> listOf("LAN" to config.lanUrl, "Tailscale" to config.vpnUrl)
+            }
+            val urls = candidates.filter { it.second.isNotBlank() }.distinctBy { it.second }
+            val errors = mutableListOf<String>()
+            var lastError = "Keine Adresse für den gewählten Verbindungsweg eingetragen."
             var established = false
-            for (url in urls) {
+            for ((route, url) in urls) {
                 try {
                     val options = api.probe(url, config)
                     val connected = A1111Api.normalizePrivateUrl(url)
                     val bridge = api.bridgeAvailable(connected, config)
                     state = state.copy(connectedUrl = connected, options = options,
                         isConnecting = false, bridgeAvailable = bridge,
-                        message = if (bridge) "Verbunden: $connected" else "Verbunden: $connected · PC-Verlauf benötigt die Erweiterung.")
+                        message = if (bridge) "Verbunden über $route: $connected" else "Verbunden über $route: $connected · PC-Verlauf benötigt die Erweiterung.")
                     established = true
                     refreshRemoteStatus()
                     break
                 } catch (e: Exception) {
                     lastError = e.message ?: "Verbindung fehlgeschlagen."
+                    errors.add("$route: $lastError")
                 }
             }
             if (!established) state = state.copy(connectedUrl = "", options = null,
-                isConnecting = false, message = "Nicht verbunden: $lastError")
+                isConnecting = false, message = "Nicht verbunden: ${errors.joinToString(" · ").ifBlank { lastError }}")
         }
     }
 
