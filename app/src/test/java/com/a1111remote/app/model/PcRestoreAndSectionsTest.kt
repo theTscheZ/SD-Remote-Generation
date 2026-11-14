@@ -52,6 +52,20 @@ class PcRestoreAndSectionsTest {
         assertEquals("adetailer", original.order.first())
     }
 
+    @Test fun `legacy layout removes editor modes and inserts independent LoRAs`() {
+        val previous = JSONObject().put("order", JSONArray()
+            .put("adetailer").put("img2img").put("generation")
+            .put("extras").put("hires"))
+        val migrated = SectionPreferences.fromJson(previous)
+        assertEquals(
+            listOf("adetailer", "generation", "loras", "hires"),
+            migrated.order
+        )
+        assertFalse(migrated.order.contains("img2img"))
+        assertFalse(migrated.order.contains("extras"))
+        assertEquals(migrated, SectionPreferences.fromJson(migrated.toJson()))
+    }
+
     @Test fun `ADetailer top key defaults to all detections`() {
         val default = AdetailerSettings()
         assertEquals(0, default.topK)
