@@ -199,7 +199,6 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
                     selected = mode == option,
                     onClick = { vm.selectMode(option) },
                     label = { Text(label) },
-                    enabled = !state.isGenerating && !state.remoteGenerating,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -248,10 +247,20 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
 
 
             OrderedGenerationSections(state, vm)
+            if (mode == GenerationMode.IMG2IMG) {
+                SectionCard("img2img") {
+                    NumberInput("Denoising Strength", current.img2imgDenoising.toString(),
+                        Modifier.fillMaxWidth(), KeyboardType.Decimal) { input ->
+                        input.toFloatOrNull()?.let { value ->
+                            vm.editSettings { it.copy(img2imgDenoising = value.coerceIn(0f, 1f)) }
+                        }
+                    }
+                }
+            }
 
 
         } else {
-        CollapsibleSection("extras", state, "Extras · Upscaling und Wiederherstellung") {
+        SectionCard("Extras · Upscaling und Wiederherstellung") {
             Choice("Upscaler", state.extras.upscaler,
                 state.options?.upscalers.orEmpty(), Modifier.fillMaxWidth()) { value ->
                 vm.editExtras { it.copy(upscaler = value) }
@@ -323,8 +332,8 @@ private fun OrderedGenerationSections(state: UiState, vm: RemoteViewModel) {
     val current = state.settings
     val mode = state.mode
     val visible = when (mode) {
-        GenerationMode.TXT2IMG -> setOf("generation", "hires", "adetailer")
-        GenerationMode.IMG2IMG -> setOf("generation", "img2img", "adetailer")
+        GenerationMode.TXT2IMG -> setOf("generation", "loras", "hires", "adetailer")
+        GenerationMode.IMG2IMG -> setOf("generation", "loras", "adetailer")
         GenerationMode.EXTRAS -> emptySet()
     }
     state.sectionPreferences.order.filter { it in visible }.forEach { section ->
@@ -367,7 +376,6 @@ private fun OrderedGenerationSections(state: UiState, vm: RemoteViewModel) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.secondary)
                 Choice("Checkpoint", current.checkpoint.ifBlank { state.options?.activeCheckpoint.orEmpty() }, state.options?.checkpoints.orEmpty(), Modifier.fillMaxWidth()) { value -> vm.editSettings { it.copy(checkpoint = value) } }
-                LoraPicker(state, vm)
             }
             }
             "hires" -> {
@@ -381,14 +389,9 @@ private fun OrderedGenerationSections(state: UiState, vm: RemoteViewModel) {
                     }
                 }
             }
-            "img2img" -> {
-                CollapsibleSection("img2img", state, "img2img") {
-                    NumberInput("Denoising Strength", current.img2imgDenoising.toString(),
-                        Modifier.fillMaxWidth(), KeyboardType.Decimal) { input ->
-                        input.toFloatOrNull()?.let { value ->
-                            vm.editSettings { it.copy(img2imgDenoising = value.coerceIn(0f, 1f)) }
-                        }
-                    }
+            "loras" -> {
+                CollapsibleSection("loras", state, "LoRAs") {
+                    LoraPicker(state, vm)
                 }
             }
             "adetailer" -> AdetailerCard(current, state, vm)
