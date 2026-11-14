@@ -203,11 +203,12 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectMode(mode: GenerationMode) {
-        if (state.isGenerating || state.remoteGenerating || state.mode == mode) return
+        if (state.mode == mode) return
+        // Switching editor tabs is allowed while a PC generation is active.
+        // The in-flight request keeps its own settings/mode snapshot from generate().
+        // Never clear progress or live results just because the editor tab changed.
         store.saveMode(mode)
-        state = state.copy(mode = mode,
-            settings = store.generation(mode),
-            generated = emptyList(), preview = null, progress = 0f)
+        state = state.copy(mode = mode, settings = store.generation(mode))
     }
 
     fun editExtras(transform: (ExtrasSettings) -> ExtrasSettings) {
