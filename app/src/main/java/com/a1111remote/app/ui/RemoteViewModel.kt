@@ -73,8 +73,21 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private val store = SecureStore(application)
     private val api = A1111Api()
     private val pcControl = PcControlClient()
+    private fun startupSettings(): GenerationSettings {
+        val saved = store.generation(store.mode())
+        val prefs = store.sectionPreferences()
+        if (!prefs.activationDefaultsConfigured) return saved
+        return saved.copy(
+            hiresEnabled = prefs.defaultEnabled["hires"] == true,
+            adetailer = saved.adetailer.copy(enabled = prefs.defaultEnabled["adetailer"] == true),
+            additionalAdetailers = saved.additionalAdetailers.map { tab ->
+                tab.copy(enabled = prefs.defaultEnabled["adetailer"] == true)
+            }
+        )
+    }
+
     var state by androidx.compose.runtime.mutableStateOf(
-        UiState(connection = store.connection(), settings = store.generation(store.mode()),
+        UiState(connection = store.connection(), settings = startupSettings(),
             mode = store.mode(), extras = store.extras(),
             sectionPreferences = store.sectionPreferences(),
             pcMac = store.pcMac(), pcControllerToken = store.pcToken())
