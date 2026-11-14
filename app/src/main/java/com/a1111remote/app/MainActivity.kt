@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -44,6 +46,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,6 +73,11 @@ private enum class Screen { GENERATE, GALLERY, CONTROL, CONNECTION, PREFERENCES 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
+        if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         setContent {
             MaterialTheme(colorScheme = scheme) {
                 Surface(color = MaterialTheme.colorScheme.background) {
@@ -84,6 +94,7 @@ private fun RemoteApp(vm: RemoteViewModel) {
     var screen by remember { mutableStateOf(Screen.GENERATE) }
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     DisposableEffect(lifecycleOwner, vm) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) vm.refreshRemoteStatus()
@@ -154,7 +165,7 @@ private fun RemoteApp(vm: RemoteViewModel) {
             }
         },
         bottomBar = {
-            NavigationBar {
+            if (!keyboardVisible) NavigationBar {
                 NavigationBarItem(selected = screen == Screen.GENERATE, onClick = { screen = Screen.GENERATE }, icon = { Icon(Icons.Default.Tune, null) }, label = { Text("Generate") })
                 NavigationBarItem(selected = screen == Screen.GALLERY, onClick = { vm.refreshGallery(); vm.refreshPcGallery(); screen = Screen.GALLERY }, icon = { Icon(Icons.Default.Image, null) }, label = { Text("Galerie") })
                 NavigationBarItem(selected = screen == Screen.CONTROL,
@@ -164,7 +175,7 @@ private fun RemoteApp(vm: RemoteViewModel) {
             }
         }
     ) { insets ->
-        Column(Modifier.fillMaxSize().padding(insets)) {
+        Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
             if (state.message.isNotEmpty()) {
                 Text(state.message, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
@@ -240,10 +251,14 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
             }
         }
         if (mode != GenerationMode.EXTRAS) {
-            OutlinedTextField(value = current.prompt, onValueChange = { text -> vm.editSettings { it.copy(prompt = text) } }, label = { Text("Prompt") },
-                minLines = 3, maxLines = 8, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = current.negativePrompt, onValueChange = { text -> vm.editSettings { it.copy(negativePrompt = text) } }, label = { Text("Negative Prompt") },
-                minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth())
+            StableMultilineField("main-prompt-${mode.name}", current.prompt, "Prompt",
+                minLines = 3, maxLines = 8) { text ->
+                vm.editSettings { it.copy(prompt = text) }
+            }
+            StableMultilineField("main-negative-${mode.name}", current.negativePrompt,
+                "Negative Prompt", minLines = 2, maxLines = 5) { text ->
+                vm.editSettings { it.copy(negativePrompt = text) }
+            }
 
 
             OrderedGenerationSections(state, vm)
@@ -531,14 +546,14 @@ private fun AdetailerCard(settings: GenerationSettings, state: UiState, vm: Remo
                 }, label = { Text("Detection Model") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
             }
-            OutlinedTextField(value = ad.prompt, onValueChange = { value ->
+            StableMultilineField("ad-prompt-${state.mode.name}-$index", ad.prompt,
+                "ADetailer Prompt", minLines = 2, maxLines = 5) { value ->
                 vm.updateAdetailer(index) { copy(prompt = value) }
-            }, label = { Text("ADetailer Prompt") },
-                modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5)
-            OutlinedTextField(value = ad.negativePrompt, onValueChange = { value ->
+            }
+            StableMultilineField("ad-negative-${state.mode.name}-$index", ad.negativePrompt,
+                "ADetailer Negative Prompt", minLines = 2, maxLines = 5) { value ->
                 vm.updateAdetailer(index) { copy(negativePrompt = value) }
-            }, label = { Text("ADetailer Negative Prompt") },
-                modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 NumberInput("Confidence (0–1)", ad.confidence.toString(),
                     Modifier.weight(1f), KeyboardType.Decimal) { input ->
@@ -946,6 +961,49 @@ private fun Choice(label: String, value: String, choices: List<String>, modifier
                 }
             }
         }
+    }
+}
+
+/**
+ * Keep text, selection and cursor position together across recompositions.
+ * A String-only TextField loses selection context when the VM publishes prompt updates,
+ * which can also trigger an unexpected bring-into-view jump in the parent scroll column.
+ */
+@Composable
+private fun StableMultilineField(
+    id: String,
+    value: String,
+    label: String,
+    minLines: Int,
+    maxLines: Int,
+    onChanged: (String) -> Unit
+) {
+    key(id) {
+        var field by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+            mutableStateOf(TextFieldValue(value))
+        }
+        LaunchedEffect(value) {
+            if (field.text != value) {
+                field = field.copy(
+                    text = value,
+                    selection = TextRange(
+                        field.selection.start.coerceIn(0, value.length),
+                        field.selection.end.coerceIn(0, value.length)
+                    )
+                )
+            }
+        }
+        OutlinedTextField(
+            value = field,
+            onValueChange = { next ->
+                field = next
+                if (next.text != value) onChanged(next.text)
+            },
+            label = { Text(label) },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = minLines,
+            maxLines = maxLines
+        )
     }
 }
 
