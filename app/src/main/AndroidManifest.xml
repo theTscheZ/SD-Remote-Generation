@@ -8,6 +8,8 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="true"
         android:label="A1111 Remote"
+        android:icon="@drawable/ic_launcher_legacy"
+        android:roundIcon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:supportsRtl="true">
         <service android:name=".GenerationStatusService" android:exported="false"
