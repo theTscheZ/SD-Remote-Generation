@@ -184,6 +184,47 @@ def _last_parameters(mode: str = "txt2img"):
             return converter(parsed.get(key, default))
         except (ValueError, TypeError):
             return default
+    # ADetailer writes its active tabs into PNG infotext as optional keys.
+    # Export only fields that are actually present, so a missing field never
+    # resets the corresponding Android setting to a guessed default.
+    def _adetailer_tabs():
+        tabs = []
+        suffixes = ("", " 2nd", " 3rd", " 4th", " 5th")
+        fields = {
+            "model": ("ADetailer model",),
+            "prompt": ("ADetailer prompt", "ad_prompt"),
+            "negative_prompt": ("ADetailer negative prompt", "ad_negative_prompt"),
+            "confidence": ("ADetailer confidence", "ADetailer detection confidence"),
+            "top_k": ("ADetailer mask only top k", "ADetailer mask k",
+                      "ADetailer top k", "ADetailer mask only the top k largest"),
+            "denoising": ("ADetailer denoising strength",),
+            "mask_blur": ("ADetailer mask blur",),
+            "padding": ("ADetailer inpaint only masked padding",),
+            "dilation": ("ADetailer mask erosion / dilation", "ADetailer dilate erode"),
+            "only_masked": ("ADetailer inpaint only masked",),
+        }
+        lookup = {str(key).strip().casefold(): value for key, value in parsed.items()}
+        for index, suffix in enumerate(suffixes):
+            current = {}
+            for name, aliases in fields.items():
+                # Different versions of ADetailer use either unsuffixed first
+                # tab or a "1st" suffix. Preserve other tabs' native suffixes.
+                variants = [suffix] if index else ["", " 1st"]
+                for alias in aliases:
+                    for variant in variants:
+                        key = (alias + variant).casefold()
+                        if key in lookup:
+                            current[name] = lookup[key]
+                            break
+                    if name in current:
+                        break
+            if current:
+                tabs.append(current)
+            elif index > 0:
+                # Skip gaps without inventing placeholder tabs.
+                continue
+        return tabs
+
     return {
         "prompt": parsed.get("Prompt", ""),
         "negative_prompt": parsed.get("Negative prompt", ""),
@@ -200,6 +241,9 @@ def _last_parameters(mode: str = "txt2img"):
         "hires_scale": number("Hires upscale", 1.5, float),
         "hires_denoising": number("Denoising strength", 0.4, float),
         "img2img_denoising": number("Denoising strength", 0.7, float),
+        "adetailer": _adetailer_tabs(),
+        "batch_count": number("Batch count", 1, int),
+        "batch_size": number("Batch size", 1, int),
     }
 
 
