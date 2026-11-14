@@ -56,7 +56,8 @@ class SecureStore(context: Context) {
         lanUrl = preferences.getString("lanUrl", "http://192.168.1.100:7860").orEmpty(),
         vpnUrl = preferences.getString("vpnUrl", "").orEmpty(),
         username = preferences.getString("username", "").orEmpty(),
-        password = decrypt(preferences.getString("password", "").orEmpty())
+        password = decrypt(preferences.getString("password", "").orEmpty()),
+        connectionMode = preferences.getString("connectionMode", "auto").orEmpty().takeIf { it in setOf("auto", "lan", "tailscale") } ?: "auto"
     )
 
     fun saveConnection(config: ConnectionSettings) {
@@ -65,6 +66,7 @@ class SecureStore(context: Context) {
             .putString("vpnUrl", config.vpnUrl)
             .putString("username", config.username)
             .putString("password", encrypt(config.password))
+            .putString("connectionMode", config.connectionMode)
             .apply()
     }
 
