@@ -11,13 +11,12 @@ data class SectionPreferences(
     val activationDefaultsConfigured: Boolean = false
 ) {
     companion object {
-        val KEYS = listOf("generation", "hires", "img2img", "adetailer", "extras")
+        val KEYS = listOf("generation", "loras", "hires", "adetailer")
         val LABELS = mapOf(
             "generation" to "Generierung",
+            "loras" to "LoRAs",
             "hires" to "Hires. Fix",
-            "img2img" to "img2img",
-            "adetailer" to "ADetailer",
-            "extras" to "Extras"
+            "adetailer" to "ADetailer"
         )
 
         fun fromJson(source: JSONObject): SectionPreferences {
@@ -29,7 +28,15 @@ data class SectionPreferences(
             val enabledJson = source.optJSONObject("defaultEnabled") ?: JSONObject()
             val defaults = SectionPreferences()
             return SectionPreferences(
-                order = (ordered + KEYS).distinct(),
+                // Preserve the old order, remove obsolete mode-only categories,
+                // and position LoRAs after Generierung on upgrades.
+                order = run {
+                    val migrated = if ("loras" in ordered || savedOrder == null) ordered
+                        else ordered.toMutableList().apply {
+                            add((indexOf("generation") + 1).coerceAtLeast(0), "loras")
+                        }
+                    (migrated + KEYS).distinct()
+                },
                 defaultExpanded = KEYS.associateWith { key ->
                     expandedJson.optBoolean(key, defaults.defaultExpanded[key] ?: true)
                 },
