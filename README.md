@@ -2,7 +2,7 @@
 
 Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted AUTOMATIC1111 Stable Diffusion WebUI** on a Windows PC.
 
-> **Status:** v0.6.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
+> **Status:** v0.7.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
 
 ## Included in v0.1
 
@@ -41,8 +41,12 @@ installed on the PC just by updating the Android APK.
 ## Generation layout and PC-parameter restoration (v0.6)
 
 Open the toolbar settings icon (**Anzeige & Standards**) to reorder **Generierung**,
-**Hires. Fix**, **img2img**, **ADetailer** and **Extras** with up/down arrows.
+**LoRAs**, **Hires. Fix** and **ADetailer** with up/down arrows.
+img2img and Extras are separate generator modes, not rearrangeable categories.
 Each category has a collapsible header and a saved initial expanded/collapsed state.
+The LoRAs section retains its previous filtering, weight and prompt-tag toggle features.
+Switching between txt2img, img2img and Extras while a generation is running is allowed;
+the running job continues with its starting settings, and new Generate requests are blocked.
 Hires. Fix and ADetailer have optional enabled-by-default presets, applied on
 the next app launch after explicit configuration. You can apply them immediately
 with the button on that settings screen. Existing prompt values are preserved.
