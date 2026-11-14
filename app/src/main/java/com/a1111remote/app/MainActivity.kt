@@ -897,7 +897,27 @@ private fun ConnectionScreen(state: UiState, vm: RemoteViewModel) {
     val conn = state.connection
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("PC verbinden", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-        Text("Zuerst LAN, dann Tailscale. Nur Adressen eintragen, die du selbst kontrollierst.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
+        Text("Verbindungsweg wählen – Auto probiert zuerst LAN, danach Tailscale.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.secondary)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("auto" to "Auto", "lan" to "WLAN", "tailscale" to "Tailscale")
+                .forEach { (route, label) ->
+                    FilterChip(
+                        selected = conn.connectionMode == route,
+                        onClick = { vm.switchConnectionMode(route) },
+                        label = { Text(label) },
+                        enabled = !state.isConnecting && !state.isGenerating &&
+                            !state.remoteGenerating,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+        }
+        Text("Der gewählte Weg wird beim Antippen sofort getestet. " +
+            "Wenn LAN bei aktivem Tailscale nicht erreichbar ist, prüfe Windows-Firewall, " +
+            "Exit Node und lokale Netzwerkrouten.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary)
         OutlinedTextField(value = conn.lanUrl, onValueChange = { v -> vm.editConnection { it.copy(lanUrl = v) } },
             label = { Text("WLAN-Adresse") }, placeholder = { Text("http://192.168.1.100:7860") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(value = conn.vpnUrl, onValueChange = { v -> vm.editConnection { it.copy(vpnUrl = v) } },
@@ -924,6 +944,7 @@ private fun ConnectionScreen(state: UiState, vm: RemoteViewModel) {
             Text("2. A1111 mit --api --listen und optional --api-auth BENUTZER:PASSWORT starten.")
             Text("3. Die lokale PC-IP und die Tailscale-IP eintragen und verbinden.")
             Text("4. PC und AUTOMATIC1111 müssen zum Generieren eingeschaltet bleiben.")
+            Text("Bei aktivem Tailscale und blockiertem LAN: Firewall-Regeln für das lokale Netzwerk, Exit Node und Allow LAN access prüfen.")
             Text("Keinen Router-Port freigeben! HTTP nur für vertrauenswürdiges LAN oder VPN.", color = Color(0xFFFFC77D))
         }
         Spacer(Modifier.height(12.dp))
