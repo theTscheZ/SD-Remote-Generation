@@ -7,7 +7,8 @@ import org.json.JSONObject
 data class SectionPreferences(
     val order: List<String> = KEYS,
     val defaultExpanded: Map<String, Boolean> = KEYS.associateWith { it != "adetailer" },
-    val defaultEnabled: Map<String, Boolean> = mapOf("hires" to false, "adetailer" to false)
+    val defaultEnabled: Map<String, Boolean> = mapOf("hires" to false, "adetailer" to false),
+    val activationDefaultsConfigured: Boolean = false
 ) {
     companion object {
         val KEYS = listOf("generation", "hires", "img2img", "adetailer", "extras")
@@ -34,7 +35,8 @@ data class SectionPreferences(
                 },
                 defaultEnabled = listOf("hires", "adetailer").associateWith { key ->
                     enabledJson.optBoolean(key, false)
-                }
+                },
+                activationDefaultsConfigured = source.optBoolean("activationDefaultsConfigured", false)
             )
         }
     }
@@ -44,6 +46,7 @@ data class SectionPreferences(
         .put("defaultExpanded", JSONObject().apply {
             defaultExpanded.forEach { (key, value) -> put(key, value) }
         })
+        .put("activationDefaultsConfigured", activationDefaultsConfigured)
         .put("defaultEnabled", JSONObject().apply {
             defaultEnabled.forEach { (key, value) -> put(key, value) }
         })
