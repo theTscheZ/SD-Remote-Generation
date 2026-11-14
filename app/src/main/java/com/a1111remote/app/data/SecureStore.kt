@@ -8,6 +8,7 @@ import com.a1111remote.app.model.ConnectionSettings
 import com.a1111remote.app.model.GenerationSettings
 import com.a1111remote.app.model.GenerationMode
 import com.a1111remote.app.model.ExtrasSettings
+import com.a1111remote.app.model.SectionPreferences
 import org.json.JSONObject
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -76,6 +77,16 @@ class SecureStore(context: Context) {
 
     fun savePcToken(token: String) {
         preferences.edit().putString("pcControllerToken", encrypt(token.trim())).apply()
+    }
+
+    fun sectionPreferences(): SectionPreferences = runCatching {
+        SectionPreferences.fromJson(
+            JSONObject(preferences.getString("sectionPreferences", "{}") ?: "{}")
+        )
+    }.getOrElse { SectionPreferences() }
+
+    fun saveSectionPreferences(settings: SectionPreferences) {
+        preferences.edit().putString("sectionPreferences", settings.toJson().toString()).apply()
     }
 
     fun generation(): GenerationSettings = runCatching {
