@@ -35,6 +35,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.a1111remote.app.model.SectionPreferences
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -61,7 +63,7 @@ import com.a1111remote.app.ui.UiState
 private val accent = Color(0xFF8CB5FF)
 private val scheme = darkColorScheme(primary = accent, secondary = Color(0xFFB1C5EA), surface = Color(0xFF171C26), background = Color(0xFF0D111B))
 
-private enum class Screen { GENERATE, GALLERY, CONTROL, CONNECTION }
+private enum class Screen { GENERATE, GALLERY, CONTROL, CONNECTION, PREFERENCES }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -135,6 +137,9 @@ private fun RemoteApp(vm: RemoteViewModel) {
                                     tint = accent)
                             }
                         }
+                        IconButton(onClick = { screen = Screen.PREFERENCES }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Anzeige-Einstellungen")
+                        }
                         Icon(if (state.connectedUrl.isNotEmpty()) Icons.Default.CheckCircle
                             else Icons.Default.CloudOff,
                             contentDescription = if (state.connectedUrl.isNotEmpty()) "Verbunden" else "Offline",
@@ -167,6 +172,7 @@ private fun RemoteApp(vm: RemoteViewModel) {
             when (screen) {
                 Screen.GENERATE -> GenerateScreen(state, vm, onOpenConnection = { screen = Screen.CONNECTION }, onGenerate = startGeneration)
                 Screen.GALLERY -> GalleryScreen(state, vm)
+                Screen.PREFERENCES -> AppearanceSettingsScreen(state, vm)
                 Screen.CONTROL -> PcControlScreen(state, vm)
                 Screen.CONNECTION -> ConnectionScreen(state, vm)
             }
@@ -240,69 +246,12 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
             OutlinedTextField(value = current.negativePrompt, onValueChange = { text -> vm.editSettings { it.copy(negativePrompt = text) } }, label = { Text("Negative Prompt") },
                 minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth())
 
-            SectionCard("Generierung") {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Choice("Sampler", current.sampler, state.options?.samplers.orEmpty(), Modifier.weight(1f)) { value -> vm.editSettings { it.copy(sampler = value) } }
-                    Choice("Scheduler", current.scheduler, state.options?.schedulers.orEmpty(), Modifier.weight(1f)) { value -> vm.editSettings { it.copy(scheduler = value) } }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NumberInput("Steps", current.steps.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(steps = value) } } }
-                    NumberInput("CFG Scale", current.cfgScale.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { value -> vm.editSettings { s -> s.copy(cfgScale = value) } } }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NumberInput("Breite", current.width.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(width = value) } } }
-                    NumberInput("Höhe", current.height.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(height = value) } } }
-                }
-                NumberInput("Seed (-1 = zufällig)", current.seed.toString(),
-                    Modifier.fillMaxWidth(), KeyboardType.Number) { input ->
-                    input.toLongOrNull()?.let { value -> vm.editSettings { it.copy(seed = value) } }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NumberInput("Batch Count", current.batchCount.toString(),
-                        Modifier.weight(1f), KeyboardType.Number) { input ->
-                        input.toIntOrNull()?.let { value ->
-                            vm.editSettings { it.copy(batchCount = value.coerceIn(1, 100)) }
-                        }
-                    }
-                    NumberInput("Batch Size", current.batchSize.toString(),
-                        Modifier.weight(1f), KeyboardType.Number) { input ->
-                        input.toIntOrNull()?.let { value ->
-                            vm.editSettings { it.copy(batchSize = value.coerceIn(1, 8)) }
-                        }
-                    }
-                }
-                Text("Gesamt: ${current.batchCount * current.batchSize} Bilder · " +
-                    "${current.batchCount} Durchläufe × ${current.batchSize} Bilder",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.secondary)
-                Choice("Checkpoint", current.checkpoint.ifBlank { state.options?.activeCheckpoint.orEmpty() }, state.options?.checkpoints.orEmpty(), Modifier.fillMaxWidth()) { value -> vm.editSettings { it.copy(checkpoint = value) } }
-                LoraPicker(state, vm)
-            }
 
-            if (mode == GenerationMode.IMG2IMG) {
-                SectionCard("img2img") {
-                    NumberInput("Denoising Strength", current.img2imgDenoising.toString(),
-                        Modifier.fillMaxWidth(), KeyboardType.Decimal) { input ->
-                        input.toFloatOrNull()?.let { value ->
-                            vm.editSettings { it.copy(img2imgDenoising = value.coerceIn(0f, 1f)) }
-                        }
-                    }
-                }
-            } else {
-                SectionCard("Hires. Fix") {
-                    ToggleRow("Aktivieren", current.hiresEnabled) { vm.editSettings { s -> s.copy(hiresEnabled = it) } }
-                    if (current.hiresEnabled) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            NumberInput("Upscale", current.hiresScale.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { n -> vm.editSettings { s -> s.copy(hiresScale = n) } } }
-                            NumberInput("Denoising", current.hiresDenoising.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { n -> vm.editSettings { s -> s.copy(hiresDenoising = n) } } }
-                        }
-                    }
-                }
-            }
-            AdetailerCard(current, state, vm)
+            OrderedGenerationSections(state, vm)
+
 
         } else {
-        SectionCard("Extras · Upscaling und Wiederherstellung") {
+        CollapsibleSection("extras", state, "Extras · Upscaling und Wiederherstellung") {
             Choice("Upscaler", state.extras.upscaler,
                 state.options?.upscalers.orEmpty(), Modifier.fillMaxWidth()) { value ->
                 vm.editExtras { it.copy(upscaler = value) }
@@ -368,6 +317,161 @@ private fun GenerateScreen(state: UiState, vm: RemoteViewModel, onOpenConnection
 }
 
 
+
+@Composable
+private fun OrderedGenerationSections(state: UiState, vm: RemoteViewModel) {
+    val current = state.settings
+    val mode = state.mode
+    val visible = when (mode) {
+        GenerationMode.TXT2IMG -> setOf("generation", "hires", "adetailer")
+        GenerationMode.IMG2IMG -> setOf("generation", "img2img", "adetailer")
+        GenerationMode.EXTRAS -> emptySet()
+    }
+    state.sectionPreferences.order.filter { it in visible }.forEach { section ->
+        when (section) {
+            "generation" -> {
+                CollapsibleSection("generation", state, "Generierung") {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Choice("Sampler", current.sampler, state.options?.samplers.orEmpty(), Modifier.weight(1f)) { value -> vm.editSettings { it.copy(sampler = value) } }
+                    Choice("Scheduler", current.scheduler, state.options?.schedulers.orEmpty(), Modifier.weight(1f)) { value -> vm.editSettings { it.copy(scheduler = value) } }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    NumberInput("Steps", current.steps.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(steps = value) } } }
+                    NumberInput("CFG Scale", current.cfgScale.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { value -> vm.editSettings { s -> s.copy(cfgScale = value) } } }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    NumberInput("Breite", current.width.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(width = value) } } }
+                    NumberInput("Höhe", current.height.toString(), Modifier.weight(1f), KeyboardType.Number) { it.toIntOrNull()?.let { value -> vm.editSettings { s -> s.copy(height = value) } } }
+                }
+                NumberInput("Seed (-1 = zufällig)", current.seed.toString(),
+                    Modifier.fillMaxWidth(), KeyboardType.Number) { input ->
+                    input.toLongOrNull()?.let { value -> vm.editSettings { it.copy(seed = value) } }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    NumberInput("Batch Count", current.batchCount.toString(),
+                        Modifier.weight(1f), KeyboardType.Number) { input ->
+                        input.toIntOrNull()?.let { value ->
+                            vm.editSettings { it.copy(batchCount = value.coerceIn(1, 100)) }
+                        }
+                    }
+                    NumberInput("Batch Size", current.batchSize.toString(),
+                        Modifier.weight(1f), KeyboardType.Number) { input ->
+                        input.toIntOrNull()?.let { value ->
+                            vm.editSettings { it.copy(batchSize = value.coerceIn(1, 8)) }
+                        }
+                    }
+                }
+                Text("Gesamt: ${current.batchCount * current.batchSize} Bilder · " +
+                    "${current.batchCount} Durchläufe × ${current.batchSize} Bilder",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary)
+                Choice("Checkpoint", current.checkpoint.ifBlank { state.options?.activeCheckpoint.orEmpty() }, state.options?.checkpoints.orEmpty(), Modifier.fillMaxWidth()) { value -> vm.editSettings { it.copy(checkpoint = value) } }
+                LoraPicker(state, vm)
+            }
+            }
+            "hires" -> {
+                CollapsibleSection("hires", state, "Hires. Fix") {
+                    ToggleRow("Aktivieren", current.hiresEnabled) { vm.editSettings { s -> s.copy(hiresEnabled = it) } }
+                    if (current.hiresEnabled) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            NumberInput("Upscale", current.hiresScale.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { n -> vm.editSettings { s -> s.copy(hiresScale = n) } } }
+                            NumberInput("Denoising", current.hiresDenoising.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { n -> vm.editSettings { s -> s.copy(hiresDenoising = n) } } }
+                        }
+                    }
+                }
+            }
+            "img2img" -> {
+                CollapsibleSection("img2img", state, "img2img") {
+                    NumberInput("Denoising Strength", current.img2imgDenoising.toString(),
+                        Modifier.fillMaxWidth(), KeyboardType.Decimal) { input ->
+                        input.toFloatOrNull()?.let { value ->
+                            vm.editSettings { it.copy(img2imgDenoising = value.coerceIn(0f, 1f)) }
+                        }
+                    }
+            }
+            "adetailer" -> AdetailerCard(current, state, vm)
+        }
+    }
+}
+
+@Composable
+private fun CollapsibleSection(
+    id: String,
+    state: UiState,
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val defaultOpen = state.sectionPreferences.defaultExpanded[id] ?: true
+    var open by rememberSaveable(id, defaultOpen) { mutableStateOf(defaultOpen) }
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().clickable { open = !open },
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(if (open) "▴" else "▾",
+                    style = MaterialTheme.typography.titleLarge)
+            }
+            if (open) content()
+        }
+    }
+}
+
+@Composable
+private fun AppearanceSettingsScreen(state: UiState, vm: RemoteViewModel) {
+    val prefs = state.sectionPreferences
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Anzeige & Standards", style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold)
+        Text("Sortiere die Kategorien mit den Pfeilen. Die Ausklapp-Einstellung " +
+            "bestimmt, wie die Bereiche beim Öffnen angezeigt werden.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary)
+        prefs.order.forEachIndexed { index, id ->
+            SectionCard(SectionPreferences.LABELS[id] ?: id) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Reihenfolge", Modifier.weight(1f))
+                    TextButton(onClick = {
+                        vm.updateSectionPreferences { it.move(id, -1) }
+                    }, enabled = index > 0) { Text("↑") }
+                    TextButton(onClick = {
+                        vm.updateSectionPreferences { it.move(id, 1) }
+                    }, enabled = index < prefs.order.lastIndex) { Text("↓") }
+                }
+                ToggleRow("Standardmäßig ausgeklappt",
+                    prefs.defaultExpanded[id] ?: true) { value ->
+                    vm.updateSectionPreferences {
+                        it.copy(defaultExpanded = it.defaultExpanded + (id to value))
+                    }
+                }
+                if (id == "hires" || id == "adetailer") {
+                    ToggleRow("Standardmäßig aktiviert",
+                        prefs.defaultEnabled[id] ?: false) { value ->
+                        vm.updateSectionPreferences {
+                            it.copy(defaultEnabled = it.defaultEnabled + (id to value))
+                        }
+                    }
+                }
+            }
+        }
+        OutlinedButton(onClick = vm::applyEnabledDefaults,
+            modifier = Modifier.fillMaxWidth()) {
+            Text("Aktivierungs-Standards jetzt anwenden")
+        }
+        Text("Bestehende Generierungswerte werden nicht stillschweigend überschrieben. " +
+            "Der Button wendet deine Aktivierungs-Standards auf die aktuelle Generierung an.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary)
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
 @Composable
 private fun AdetailerCard(settings: GenerationSettings, state: UiState, vm: RemoteViewModel) {
     val units = listOf(settings.adetailer) + settings.additionalAdetailers
@@ -375,7 +479,7 @@ private fun AdetailerCard(settings: GenerationSettings, state: UiState, vm: Remo
     val index = selectedTab.coerceIn(0, units.lastIndex)
     val ad = units[index]
     var expanded by remember { mutableStateOf(true) }
-    SectionCard("ADetailer") {
+    CollapsibleSection("adetailer", state, "ADetailer") {
         if (state.options != null && !state.options.adetailerInstalled) {
             Text("ADetailer wurde auf dem PC nicht erkannt.",
                 color = Color(0xFFFFC77D), style = MaterialTheme.typography.bodySmall)
@@ -435,6 +539,14 @@ private fun AdetailerCard(settings: GenerationSettings, state: UiState, vm: Remo
                         vm.updateAdetailer(index) { copy(confidence = value.coerceIn(0f, 1f)) }
                     }
                 }
+                NumberInput("Top (0 = alle)", ad.topK.toString(),
+                    Modifier.weight(1f), KeyboardType.Number) { input ->
+                    input.toIntOrNull()?.let { value ->
+                        vm.updateAdetailer(index) { copy(topK = value.coerceIn(0, 10)) }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 NumberInput("Denoising (0–1)", ad.denoising.toString(),
                     Modifier.weight(1f), KeyboardType.Decimal) { input ->
                     input.toFloatOrNull()?.let { value ->
