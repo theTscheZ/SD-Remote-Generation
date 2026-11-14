@@ -57,17 +57,35 @@ def _sleep_guard_loop():
     continuous = 0x80000000
     system_required = 0x00000001
     kernel32 = ctypes.windll.kernel32
+    kernel32.SetThreadExecutionState.argtypes = [ctypes.c_uint32]
+    kernel32.SetThreadExecutionState.restype = ctypes.c_uint32
+
     requested = False
+    last_active = None
+    # A1111's job string may briefly become empty between processing stages.
+    # Keep the request for a short grace period rather than clearing it
+    # immediately, but allow ordinary idle sleep after completion.
+    grace_seconds = 120
+    print("[A1111 Remote] Windows sleep guard monitoring generation state.")
     try:
         while True:
-            active = bool(getattr(shared.state, "job", ""))
-            if active != requested:
-                # This call is thread-scoped and must be released from the
-                # same thread once processing has ended.
-                result = kernel32.SetThreadExecutionState(
-                    (continuous | system_required) if active else continuous
-                )
-                requested = bool(result and active)
+            now = time.monotonic()
+            job = str(getattr(shared.state, "job", "") or "")
+            if job.strip():
+                last_active = now
+            should_hold = last_active is not None and now - last_active < grace_seconds
+            if should_hold != requested:
+                # This request belongs to this dedicated thread and must
+                # be cleared from the same thread when work is finished.
+                flags = continuous | system_required if should_hold else continuous
+                result = kernel32.SetThreadExecutionState(flags)
+                if result:
+                    requested = should_hold
+                    print("[A1111 Remote] Windows sleep guard " +
+                          ("ACTIVE (generation or cooldown)" if requested
+                           else "RELEASED (idle)."))
+                else:
+                    print("[A1111 Remote] WARNING: SetThreadExecutionState failed.")
             time.sleep(5)
     finally:
         if requested:
