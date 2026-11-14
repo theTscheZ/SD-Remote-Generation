@@ -22,6 +22,8 @@ import com.a1111remote.app.model.ConnectionSettings
 import com.a1111remote.app.model.GenerationSettings
 import com.a1111remote.app.model.GenerationMode
 import com.a1111remote.app.model.ExtrasSettings
+import com.a1111remote.app.model.SectionPreferences
+import com.a1111remote.app.model.PcParameterMapper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,6 +43,7 @@ data class LocalImage(val file: File, val preview: Bitmap, val label: String)
 data class UiState(
     val connection: ConnectionSettings = ConnectionSettings(),
     val settings: GenerationSettings = GenerationSettings(),
+    val sectionPreferences: SectionPreferences = SectionPreferences(),
     val mode: GenerationMode = GenerationMode.TXT2IMG,
     val extras: ExtrasSettings = ExtrasSettings(),
     val sourcePreview: Bitmap? = null,
@@ -73,6 +76,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     var state by androidx.compose.runtime.mutableStateOf(
         UiState(connection = store.connection(), settings = store.generation(store.mode()),
             mode = store.mode(), extras = store.extras(),
+            sectionPreferences = store.sectionPreferences(),
             pcMac = store.pcMac(), pcControllerToken = store.pcToken())
     )
         private set
@@ -158,6 +162,25 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 state = state.copy(pcControlBusy = false)
             }
         }
+    }
+
+    fun updateSectionPreferences(transform: (SectionPreferences) -> SectionPreferences) {
+        val updated = transform(state.sectionPreferences)
+        state = state.copy(sectionPreferences = updated)
+        store.saveSectionPreferences(updated)
+    }
+
+    fun applyEnabledDefaults() {
+        val presets = state.sectionPreferences.defaultEnabled
+        val updated = state.settings.copy(
+            hiresEnabled = presets["hires"] == true,
+            adetailer = state.settings.adetailer.copy(enabled = presets["adetailer"] == true),
+            additionalAdetailers = state.settings.additionalAdetailers.map {
+                it.copy(enabled = presets["adetailer"] == true)
+            }
+        )
+        editSettings { updated }
+        state = state.copy(message = "Aktivierungs-Standards auf diese Generierung angewendet.")
     }
 
     fun editSettings(transform: (GenerationSettings) -> GenerationSettings) {
@@ -437,7 +460,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     (model.isNotBlank() && it.contains(model, ignoreCase = true)) ||
                         (hash.isNotBlank() && it.contains(hash, ignoreCase = true))
                 } ?: old.checkpoint
-                val updated = old.copy(
+                val updated = PcParameterMapper.restoreAdetailers(old.copy(
                     prompt = data.optString("prompt", old.prompt),
                     negativePrompt = data.optString("negative_prompt", old.negativePrompt),
                     steps = data.optInt("steps", old.steps),
@@ -451,10 +474,15 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     hiresEnabled = data.optBoolean("hires_enabled", old.hiresEnabled),
                     hiresScale = data.optDouble("hires_scale", old.hiresScale.toDouble()).toFloat(),
                     hiresDenoising = data.optDouble("hires_denoising", old.hiresDenoising.toDouble()).toFloat(),
-                    img2imgDenoising = data.optDouble("img2img_denoising", old.img2imgDenoising.toDouble()).toFloat()
-                )
+                    img2imgDenoising = data.optDouble("img2img_denoising", old.img2imgDenoising.toDouble()).toFloat(),
+                    batchCount = data.optInt("batch_count", old.batchCount),
+                    batchSize = data.optInt("batch_size", old.batchSize)
+                ), data)
                 editSettings { updated }
-                state = state.copy(message = "Letzte Generierungsparameter vom PC übernommen.")
+                val foundTabs = data.optJSONArray("adetailer")?.length() ?: 0
+                state = state.copy(message = if (foundTabs > 0)
+                    "PC-Parameter inklusive $foundTabs ADetailer-Tab(s) übernommen."
+                    else "PC-Parameter übernommen. Keine ADetailer-Metadaten im gespeicherten Bild gefunden.")
             } catch (error: Exception) {
                 state = state.copy(message = "PC-Parameter konnten nicht geladen werden: ${error.message}")
             } finally {
