@@ -33,7 +33,8 @@ data class ConnectionSettings(
     val lanUrl: String = "http://192.168.1.100:7860",
     val vpnUrl: String = "",
     val username: String = "",
-    val password: String = ""
+    val password: String = "",
+    val connectionMode: String = "auto" // auto, lan, tailscale
 )
 
 data class AdetailerSettings(
