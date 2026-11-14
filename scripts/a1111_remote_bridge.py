@@ -42,6 +42,51 @@ def _authorized(creds: HTTPBasicCredentials | None = Depends(_auth_scheme)):
     raise HTTPException(401, "Invalid API credentials", headers={"WWW-Authenticate": "Basic"})
 
 
+# Keep Windows awake only while A1111 reports an active generation job.
+# This is deliberately separate from the Android connection: it continues to
+# work even if the phone goes into the background or loses network access.
+_sleep_guard_started = False
+_sleep_guard_lock = threading.Lock()
+
+
+def _sleep_guard_loop():
+    if os.name != "nt":
+        return
+    import ctypes
+
+    continuous = 0x80000000
+    system_required = 0x00000001
+    kernel32 = ctypes.windll.kernel32
+    requested = False
+    try:
+        while True:
+            active = bool(getattr(shared.state, "job", ""))
+            if active != requested:
+                # This call is thread-scoped and must be released from the
+                # same thread once processing has ended.
+                result = kernel32.SetThreadExecutionState(
+                    (continuous | system_required) if active else continuous
+                )
+                requested = bool(result and active)
+            time.sleep(5)
+    finally:
+        if requested:
+            kernel32.SetThreadExecutionState(continuous)
+
+
+def _enable_sleep_guard():
+    global _sleep_guard_started
+    if os.name != "nt":
+        return
+    with _sleep_guard_lock:
+        if _sleep_guard_started:
+            return
+        _sleep_guard_started = True
+        threading.Thread(
+            target=_sleep_guard_loop, name="a1111-remote-sleep-guard", daemon=True
+        ).start()
+
+
 def _roots():
     base = Path(data_path)
     opts = shared.opts
@@ -267,6 +312,7 @@ def _add_routes(_demo, app):
     app.add_api_route("/sd-remote/v1/images", lambda: {"images": _index()["images"]}, methods=["GET"], dependencies=secure)
     app.add_api_route("/sd-remote/v1/images/{identifier}/preview", _preview, methods=["GET"], dependencies=secure)
     app.add_api_route("/sd-remote/v1/images/{identifier}/file", lambda identifier: FileResponse(_find_image(identifier)), methods=["GET"], dependencies=secure)
+    _enable_sleep_guard()
     print("[A1111 Remote] PC history bridge active (API Basic authentication required).")
 
 
