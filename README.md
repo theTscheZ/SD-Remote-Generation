@@ -38,6 +38,23 @@ shutdown requires confirmation.
 firewall rule to trusted private LAN/Tailscale connections. The helper is not
 installed on the PC just by updating the Android APK.
 
+## LAN / Tailscale selection and Windows sleep protection (v0.10)
+
+- **Verbindung**: choose **Auto**, **WLAN** or **Tailscale**. Auto tries LAN
+  first and falls back to Tailscale. Tapping a choice runs a connection test;
+  detailed errors identify which route failed. This does not bypass Windows
+  firewall or network routing: if Tailscale itself makes the LAN IP
+  unreachable, check Windows' network profile and inbound rules for the A1111
+  port, Tailscale exit-node LAN access and any subnet route overlaps.
+- **Keep the PC awake while generating**: install the updated
+  `scripts/a1111_remote_bridge.py` on the Windows PC and restart A1111.
+  While A1111 reports an active generation job, the bridge requests that
+  Windows not automatically suspend. It releases the request when the
+  generation finishes, so normal idle sleep remains possible afterward.
+  It cannot prevent intentional Sleep, forced shutdown, closing a laptop lid,
+  or unsupported sleep behavior, and it is inactive unless the updated bridge
+  is running. The Android app alone cannot reliably prevent Windows sleep.
+
 ## Generation layout and PC-parameter restoration (v0.6)
 
 Open the toolbar settings icon (**Anzeige & Standards**) to reorder **Generierung**,
