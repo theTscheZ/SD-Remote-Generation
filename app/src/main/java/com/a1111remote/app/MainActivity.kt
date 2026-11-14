@@ -328,6 +328,7 @@ private fun OrderedGenerationSections(state: UiState, vm: RemoteViewModel) {
         GenerationMode.EXTRAS -> emptySet()
     }
     state.sectionPreferences.order.filter { it in visible }.forEach { section ->
+        key(section) {
         when (section) {
             "generation" -> {
                 CollapsibleSection("generation", state, "Generierung") {
@@ -392,6 +393,7 @@ private fun OrderedGenerationSections(state: UiState, vm: RemoteViewModel) {
             }
             "adetailer" -> AdetailerCard(current, state, vm)
         }
+        }
     }
 }
 
@@ -455,7 +457,8 @@ private fun AppearanceSettingsScreen(state: UiState, vm: RemoteViewModel) {
                     ToggleRow("Standardmäßig aktiviert",
                         prefs.defaultEnabled[id] ?: false) { value ->
                         vm.updateSectionPreferences {
-                            it.copy(defaultEnabled = it.defaultEnabled + (id to value))
+                            it.copy(defaultEnabled = it.defaultEnabled + (id to value),
+                                activationDefaultsConfigured = true)
                         }
                     }
                 }
