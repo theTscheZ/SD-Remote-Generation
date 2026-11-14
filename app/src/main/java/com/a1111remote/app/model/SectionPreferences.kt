@@ -33,7 +33,9 @@ data class SectionPreferences(
                 order = run {
                     val migrated = if ("loras" in ordered || savedOrder == null) ordered
                         else ordered.toMutableList().apply {
-                            add((indexOf("generation") + 1).coerceAtLeast(0), "loras")
+                            val generationIndex = indexOf("generation")
+                            if (generationIndex >= 0) add(generationIndex + 1, "loras")
+                            else add("loras")
                         }
                     (migrated + KEYS).distinct()
                 },
