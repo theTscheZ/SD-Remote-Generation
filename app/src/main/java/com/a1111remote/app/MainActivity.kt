@@ -388,6 +388,7 @@ private fun OrderedGenerationSections(state: UiState, vm: RemoteViewModel) {
                             vm.editSettings { it.copy(img2imgDenoising = value.coerceIn(0f, 1f)) }
                         }
                     }
+                }
             }
             "adetailer" -> AdetailerCard(current, state, vm)
         }
