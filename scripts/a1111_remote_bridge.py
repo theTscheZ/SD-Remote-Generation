@@ -42,9 +42,10 @@ def _authorized(creds: HTTPBasicCredentials | None = Depends(_auth_scheme)):
     raise HTTPException(401, "Invalid API credentials", headers={"WWW-Authenticate": "Basic"})
 
 
-# Keep Windows awake only while A1111 reports an active generation job.
-# This is deliberately separate from the Android connection: it continues to
-# work even if the phone goes into the background or loses network access.
+# Prevent Windows' automatic idle sleep for the entire A1111 WebUI session,
+# including the time between generations. No dependency on Android connectivity.
+# The execution-state request is thread-scoped and automatically disappears
+# when the WebUI process exits. Explicit sleep / lid-close is not prevented.
 _sleep_guard_started = False
 _sleep_guard_lock = threading.Lock()
 
@@ -54,42 +55,42 @@ def _sleep_guard_loop():
         return
     import ctypes
 
-    continuous = 0x80000000
-    system_required = 0x00000001
+    es_continuous = 0x80000000
+    es_system_required = 0x00000001
     kernel32 = ctypes.windll.kernel32
     kernel32.SetThreadExecutionState.argtypes = [ctypes.c_uint32]
     kernel32.SetThreadExecutionState.restype = ctypes.c_uint32
 
-    requested = False
-    last_active = None
-    # A1111's job string may briefly become empty between processing stages.
-    # Keep the request for a short grace period rather than clearing it
-    # immediately, but allow ordinary idle sleep after completion.
-    grace_seconds = 120
-    print("[A1111 Remote] Windows sleep guard monitoring generation state.")
+    enabled = False
     try:
+        # This dedicated thread must remain alive: Windows attributes the
+        # persistent power request to the calling thread, not the app as a whole.
         while True:
-            now = time.monotonic()
-            job = str(getattr(shared.state, "job", "") or "")
-            if job.strip():
-                last_active = now
-            should_hold = last_active is not None and now - last_active < grace_seconds
-            if should_hold != requested:
-                # This request belongs to this dedicated thread and must
-                # be cleared from the same thread when work is finished.
-                flags = continuous | system_required if should_hold else continuous
-                result = kernel32.SetThreadExecutionState(flags)
-                if result:
-                    requested = should_hold
-                    print("[A1111 Remote] Windows sleep guard " +
-                          ("ACTIVE (generation or cooldown)" if requested
-                           else "RELEASED (idle)."))
-                else:
-                    print("[A1111 Remote] WARNING: SetThreadExecutionState failed.")
-            time.sleep(5)
+            result = kernel32.SetThreadExecutionState(
+                es_continuous | es_system_required
+            )
+            if result:
+                if not enabled:
+                    print(
+                        "[A1111 Remote] Windows automatic sleep prevention ACTIVE "
+                        "for the entire A1111 session (display may turn off).",
+                        flush=True,
+                    )
+                enabled = True
+            else:
+                enabled = False
+                print(
+                    "[A1111 Remote] WARNING: Could not register Windows "
+                    "sleep prevention.",
+                    flush=True,
+                )
+            # Renew/check periodically; do not clear on idle or between jobs.
+            time.sleep(60)
     finally:
-        if requested:
-            kernel32.SetThreadExecutionState(continuous)
+        # Executed on graceful thread exit; Windows also clears this
+        # thread-scoped request when its process terminates.
+        if enabled:
+            kernel32.SetThreadExecutionState(es_continuous)
 
 
 def _enable_sleep_guard():
@@ -99,10 +100,12 @@ def _enable_sleep_guard():
     with _sleep_guard_lock:
         if _sleep_guard_started:
             return
-        _sleep_guard_started = True
         threading.Thread(
-            target=_sleep_guard_loop, name="a1111-remote-sleep-guard", daemon=True
+            target=_sleep_guard_loop,
+            name="a1111-remote-sleep-guard",
+            daemon=True,
         ).start()
+        _sleep_guard_started = True
 
 
 def _roots():
