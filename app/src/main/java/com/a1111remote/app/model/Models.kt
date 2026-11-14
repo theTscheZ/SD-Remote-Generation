@@ -42,6 +42,7 @@ data class AdetailerSettings(
     val prompt: String = "",
     val negativePrompt: String = "",
     val confidence: Float = 0.3f,
+    val topK: Int = 0,
     val denoising: Float = 0.4f,
     val maskBlur: Int = 4,
     val padding: Int = 32,
@@ -54,6 +55,7 @@ data class AdetailerSettings(
         .put("ad_prompt", prompt)
         .put("ad_negative_prompt", negativePrompt)
         .put("ad_confidence", confidence.toDouble())
+        .put("ad_mask_k", topK.coerceIn(0, 10))
         .put("ad_denoising_strength", denoising.toDouble())
         .put("ad_mask_blur", maskBlur)
         .put("ad_inpaint_only_masked_padding", padding)
@@ -62,7 +64,7 @@ data class AdetailerSettings(
     fun toStoredJson(): JSONObject = JSONObject()
         .put("enabled", enabled).put("model", model)
         .put("prompt", prompt).put("negativePrompt", negativePrompt)
-        .put("confidence", confidence.toDouble()).put("denoising", denoising.toDouble())
+        .put("confidence", confidence.toDouble()).put("topK", topK).put("denoising", denoising.toDouble())
         .put("maskBlur", maskBlur).put("padding", padding)
         .put("dilation", dilation).put("onlyMasked", onlyMasked)
     companion object {
@@ -71,6 +73,7 @@ data class AdetailerSettings(
             model = a.optString("model", "face_yolov8n.pt"),
             prompt = a.optString("prompt"), negativePrompt = a.optString("negativePrompt"),
             confidence = a.optDouble("confidence", 0.3).toFloat(),
+            topK = a.optInt("topK", 0).coerceIn(0, 10),
             denoising = a.optDouble("denoising", 0.4).toFloat(),
             maskBlur = a.optInt("maskBlur", 4), padding = a.optInt("padding", 32),
             dilation = a.optInt("dilation", 4), onlyMasked = a.optBoolean("onlyMasked", true)
