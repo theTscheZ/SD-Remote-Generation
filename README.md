@@ -2,7 +2,7 @@
 
 Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted AUTOMATIC1111 Stable Diffusion WebUI** on a Windows PC.
 
-> **Status:** v0.5.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
+> **Status:** v0.6.0 prototype. Generated APK compiles in CI; actual PC integration must still be tested on an Android device.
 
 ## Included in v0.1
 
@@ -37,6 +37,30 @@ shutdown requires confirmation.
 **Do not forward** the helper's port to the public internet. Limit the Windows
 firewall rule to trusted private LAN/Tailscale connections. The helper is not
 installed on the PC just by updating the Android APK.
+
+## Generation layout and PC-parameter restoration (v0.6)
+
+Open the toolbar settings icon (**Anzeige & Standards**) to reorder **Generierung**,
+**Hires. Fix**, **img2img**, **ADetailer** and **Extras** with up/down arrows.
+Each category has a collapsible header and a saved initial expanded/collapsed state.
+Hires. Fix and ADetailer have optional enabled-by-default presets, applied on
+the next app launch after explicit configuration. You can apply them immediately
+with the button on that settings screen. Existing prompt values are preserved.
+
+ADetailer now exposes **Top (0 = alle)**, sent as `ad_mask_k` for each tab
+(0 disables the limit; 1–10 selects the largest detected areas).
+
+**Letzte PC-Parameter übernehmen** restores the recorded main/negative prompts,
+image settings, Hires. Fix, batch count/size and available ADetailer tab
+models, prompts, negative prompts, detection confidence, top-k, masking and
+denoising values. Update the **PC bridge script** in
+`scripts/a1111_remote_bridge.py` and restart AUTOMATIC1111 for the improved
+ADetailer import to work.
+
+Note that not every ADetailer setting is saved in every PNG infotext/version;
+the app preserves its existing value when a metadata field is absent and
+reports when no ADetailer metadata was available. It does not claim to
+reconstruct parameters that the PC never saved.
 
 ## Install / build
 
