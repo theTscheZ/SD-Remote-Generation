@@ -3,6 +3,7 @@ package com.a1111remote.app.data
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
 import com.a1111remote.app.model.ConnectionSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -126,12 +127,22 @@ class PcControlClient {
         val wifiNetwork = manager.allNetworks.firstOrNull { network ->
             manager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
         } ?: throw IllegalStateException("Wake-on-LAN funktioniert hier nur über das Heim-WLAN.")
-        DatagramSocket().use { socket ->
-            wifiNetwork.bindSocket(socket)
-            socket.broadcast = true
-            val target = InetAddress.getByName("255.255.255.255")
-            val packet = DatagramPacket(magic, magic.size, target, 9)
-            repeat(3) { socket.send(packet) }
+        // Android may reject Network.bindSocket() with EPERM on some devices.
+        // Normal UDP broadcast uses the active Wi-Fi route without privileged binding.
+        // Avoid sending via a VPN-only network: verify a Wi-Fi transport first.
+        val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val lock = wifi.createMulticastLock("a1111-remote-wol")
+        lock.setReferenceCounted(false)
+        lock.acquire()
+        try {
+            DatagramSocket().use { socket ->
+                socket.broadcast = true
+                val target = InetAddress.getByName("255.255.255.255")
+                val packet = DatagramPacket(magic, magic.size, target, 9)
+                repeat(3) { socket.send(packet) }
+            }
+        } finally {
+            if (lock.isHeld) lock.release()
         }
     }
 }
