@@ -305,6 +305,7 @@ def _last_parameters(mode: str = "txt2img"):
         "model_hash": parsed.get("Model hash", ""),
         "hires_enabled": "Hires upscale" in parsed or "Hires steps" in parsed,
         "hires_scale": number("Hires upscale", 1.5, float),
+        "hires_steps": number("Hires steps", 0, int),
         "hires_denoising": number("Denoising strength", 0.4, float),
         "img2img_denoising": number("Denoising strength", 0.7, float),
         "adetailer": _adetailer_tabs(),
