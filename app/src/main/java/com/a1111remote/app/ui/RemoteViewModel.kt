@@ -34,11 +34,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import java.text.DateFormat
-import java.util.Date
-
-/** Local-only gallery. Remote browsing of previous PC images is a later milestone. */
-data class LocalImage(val file: File, val preview: Bitmap, val label: String)
 
 data class UiState(
     val connection: ConnectionSettings = ConnectionSettings(),
@@ -55,7 +50,6 @@ data class UiState(
     val progress: Float = 0f,
     val preview: Bitmap? = null,
     val generated: List<Bitmap> = emptyList(),
-    val gallery: List<LocalImage> = emptyList(),
     val bridgeAvailable: Boolean = false,
     val pcImages: List<PcImage> = emptyList(),
     val pcPreviews: Map<String, Bitmap> = emptyMap(),
@@ -100,7 +94,19 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private val loadingThumbs = mutableSetOf<String>()
     private var sourceBytes: ByteArray? = null
 
-    init { refreshGallery(); connect() }
+    init {
+        // Remove the old, auto-saved private PNG gallery from previous versions.
+        // Files exported by the user to Pictures/A1111 Remote are NOT touched.
+        viewModelScope.launch(Dispatchers.IO) {
+            val legacyDir = File(getApplication<Application>().filesDir, "images")
+            if (legacyDir.isDirectory) {
+                legacyDir.listFiles()?.filter { it.isFile && it.name.startsWith("a1111_") &&
+                    it.extension.equals("png", ignoreCase = true) }?.forEach { it.delete() }
+                if (legacyDir.listFiles().isNullOrEmpty()) legacyDir.delete()
+            }
+        }
+        connect()
+    }
 
     fun editConnection(transform: (ConnectionSettings) -> ConnectionSettings) {
         val updated = transform(state.connection)
@@ -379,10 +385,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             }
             try {
                 val images = api.generate(url, credentials, settings, mode, source, extras)
-                withContext(Dispatchers.IO) { saveLocal(images) }
+                // Current generation only: decoded results stay in RAM until
+                // the next job, when generate() clears them. No automatic disk writes.
                 state = state.copy(generated = images.mapNotNull(::decodeBitmap), progress = 1f,
-                    message = "${images.size} Bild(er) fertig und lokal gespeichert.")
-                refreshGallery()
+                    message = "${images.size} Bild(er) fertig. Ergebnisse nur temporär angezeigt; Originale bleiben auf dem PC.")
             } catch (e: CancellationException) {
                 state = state.copy(message = "Anfrage abgebrochen. Möglicherweise arbeitet der PC weiter.")
             } catch (e: Exception) {
@@ -601,62 +607,5 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private fun decodeBitmap(bytes: ByteArray): Bitmap? =
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
 
-    private fun outputDir(): File = File(getApplication<Application>().filesDir, "images").apply { mkdirs() }
 
-    private fun saveLocal(images: List<ByteArray>) {
-        images.forEach { bytes ->
-            File(outputDir(), "a1111_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.png").writeBytes(bytes)
-        }
-    }
-
-    fun refreshGallery() {
-        viewModelScope.launch {
-            val gallery = withContext(Dispatchers.IO) {
-                outputDir().listFiles()?.filter { it.isFile && it.extension == "png" }
-                    ?.sortedByDescending { it.lastModified() }
-                    ?.take(120)
-                    ?.mapNotNull { file ->
-                        try {
-                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            BitmapFactory.decodeFile(file.absolutePath, bounds)
-                            val scale = (maxOf(bounds.outHeight, bounds.outWidth) / 512).coerceAtLeast(1)
-                            val options = BitmapFactory.Options().apply { inSampleSize = scale }
-                            val bitmap = BitmapFactory.decodeFile(file.absolutePath, options)
-                            bitmap?.let { LocalImage(file, it, DateFormat.getDateTimeInstance().format(Date(file.lastModified()))) }
-                        } catch (_: Exception) { null }
-                    }.orEmpty()
-            }
-            state = state.copy(gallery = gallery)
-        }
-    }
-
-    fun exportImage(image: LocalImage) {
-        viewModelScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    val resolver = getApplication<Application>().contentResolver
-                    val name = image.file.name
-                    val values = ContentValues().apply {
-                        put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/A1111 Remote")
-                        put(MediaStore.Images.Media.IS_PENDING, 1)
-                    }
-                    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                        ?: throw IOException("MediaStore konnte keine Datei anlegen.")
-                    try {
-                        resolver.openOutputStream(uri)?.use { out -> image.file.inputStream().use { it.copyTo(out) } }
-                            ?: throw IOException("Schreibzugriff nicht verfügbar.")
-                        resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
-                    } catch (e: Exception) {
-                        resolver.delete(uri, null, null)
-                        throw e
-                    }
-                }
-                state = state.copy(message = "Bild in Pictures/A1111 Remote gespeichert.")
-            } catch (e: Exception) {
-                state = state.copy(message = "Export fehlgeschlagen: ${e.message}")
-            }
-        }
-    }
 }
