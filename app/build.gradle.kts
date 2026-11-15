@@ -12,8 +12,8 @@ android {
         applicationId = "com.a1111remote.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.10.2"
+        versionCode = 13
+        versionName = "0.10.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -35,7 +35,10 @@ android {
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 strips the many unused Material Icons and Compose classes.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             if (hasStableSigning) signingConfig = signingConfigs.getByName("stable")
         }
     }
