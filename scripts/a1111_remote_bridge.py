@@ -11,6 +11,9 @@ import io
 import os
 import re
 import secrets
+import socket
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -106,6 +109,52 @@ def _enable_sleep_guard():
             daemon=True,
         ).start()
         _sleep_guard_started = True
+
+
+# Launch the optional PC controller alongside A1111, without another
+# console window. No controller is launched before its setup exists.
+_pc_helper_started = False
+_pc_helper_lock = threading.Lock()
+
+
+def _start_pc_helper():
+    global _pc_helper_started
+    if os.name != "nt":
+        return
+    with _pc_helper_lock:
+        if _pc_helper_started:
+            return
+        _pc_helper_started = True
+        helper = Path(__file__).resolve().parent.parent / "pc-control" / "pc_control_helper.py"
+        config = Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "A1111Remote" / "controller.json"
+        if not helper.is_file() or not config.is_file():
+            print("[A1111 Remote] PC controller not configured; skipping auto-start.",
+                  flush=True)
+            return
+        try:
+            # If manually started, do not compete for the same port.
+            with socket.create_connection(("127.0.0.1", 42001), timeout=0.4):
+                print("[A1111 Remote] PC controller already listening on 42001.",
+                      flush=True)
+                return
+        except OSError:
+            pass
+        try:
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.Popen(
+                [sys.executable, str(helper), "serve",
+                 "--parent-pid", str(os.getpid())],
+                cwd=str(helper.parent),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=flags,
+            )
+            print("[A1111 Remote] PC controller launched silently with A1111.",
+                  flush=True)
+        except OSError as error:
+            print(f"[A1111 Remote] PC controller auto-start failed: {error}",
+                  flush=True)
 
 
 def _roots():
@@ -335,6 +384,7 @@ def _add_routes(_demo, app):
     app.add_api_route("/sd-remote/v1/images/{identifier}/preview", _preview, methods=["GET"], dependencies=secure)
     app.add_api_route("/sd-remote/v1/images/{identifier}/file", lambda identifier: FileResponse(_find_image(identifier)), methods=["GET"], dependencies=secure)
     _enable_sleep_guard()
+    _start_pc_helper()
     print("[A1111 Remote] PC history bridge active (API Basic authentication required).")
 
 
