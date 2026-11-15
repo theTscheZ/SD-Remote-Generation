@@ -512,6 +512,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     checkpoint = checkpoint,
                     hiresEnabled = data.optBoolean("hires_enabled", old.hiresEnabled),
                     hiresScale = data.optDouble("hires_scale", old.hiresScale.toDouble()).toFloat(),
+                    hiresSteps = data.optInt("hires_steps", old.hiresSteps),
                     hiresDenoising = data.optDouble("hires_denoising", old.hiresDenoising.toDouble()).toFloat(),
                     img2imgDenoising = data.optDouble("img2img_denoising", old.img2imgDenoising.toDouble()).toFloat(),
                     batchCount = data.optInt("batch_count", old.batchCount),
