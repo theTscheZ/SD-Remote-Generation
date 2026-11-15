@@ -142,18 +142,29 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun pcAction(action: String) {
-        if (state.pcControlBusy || action !in setOf("start", "stop", "shutdown", "shutdown/cancel")) return
+        if (state.pcControlBusy || action !in setOf("start", "stop", "sleep", "shutdown", "shutdown/cancel")) return
+        if (action == "sleep" && (state.isGenerating || state.remoteGenerating)) {
+            state = state.copy(pcControlMessage = "Generierung läuft. Vor dem Energiesparmodus zuerst beenden.")
+            return
+        }
         viewModelScope.launch {
             state = state.copy(pcControlBusy = true, pcControlMessage = "Befehl wird gesendet …")
             try {
                 val message = pcControl.action(state.connection, state.pcControllerToken, action)
-                state = state.copy(
+                state = if (action == "sleep") {
+                    // Once Windows sleeps, old online status is no longer reliable.
+                    // Keep saved connection settings for reconnection after wake.
+                    state.copy(pcControlMessage = "Energiesparmodus angefordert. " +
+                        "Aufwecken über Heim-WLAN möglich, falls Wake-on-LAN eingerichtet ist.",
+                        pcControllerStatus = null, connectedUrl = "",
+                        bridgeAvailable = false, options = null)
+                } else state.copy(
                     pcControlMessage = message,
                     pcControllerStatus = if (action == "shutdown")
                         state.pcControllerStatus?.copy(shutdownPending = true)
                     else state.pcControllerStatus
                 )
-                if (action != "shutdown") {
+                if (action != "shutdown" && action != "sleep") {
                     val status = runCatching {
                         pcControl.status(state.connection, state.pcControllerToken)
                     }.getOrNull()
@@ -174,7 +185,28 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 pcControl.wake(getApplication<Application>(), state.pcMac)
                 state = state.copy(pcControlMessage =
-                    "Wake-on-LAN gesendet. Der PC braucht eventuell etwas Zeit zum Hochfahren.")
+                    "Wake-on-LAN gesendet (Heim-WLAN). Ob der PC aufwacht, wird geprüft.")
+                // A sleeping PC cannot run Tailscale or answer HTTP requests.
+                // Probe the controller after the magic packet and reconnect
+                // when it has genuinely returned. Never claim wake before reply.
+                viewModelScope.launch {
+                    repeat(12) {
+                        delay(5000)
+                        if (state.isGenerating || state.isConnecting) return@launch
+                        val online = runCatching {
+                            pcControl.status(state.connection, state.pcControllerToken)
+                        }.getOrNull()
+                        if (online != null) {
+                            state = state.copy(pcControllerStatus = online,
+                                pcControlMessage = "PC wieder erreichbar. Verbinde A1111 …")
+                            connect()
+                            return@launch
+                        }
+                    }
+                    state = state.copy(pcControlMessage =
+                        "Aufwecksignal gesendet, aber PC nicht erreichbar. " +
+                        "Wake-on-LAN und LAN-Verbindung prüfen.")
+                }
             } catch (e: Exception) {
                 state = state.copy(pcControlMessage = "Wake-on-LAN fehlgeschlagen: ${e.message}")
             } finally {
