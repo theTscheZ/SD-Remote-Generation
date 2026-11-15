@@ -18,9 +18,23 @@ Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted
 - Batch Count (n_iter) and Batch Size (batch_size) separately, with total image count
 - Foreground service while generating, with Android notification progress during background use; resumed app rechecks current PC progress (Android notification permission requested on first run)
 - Progress bar, intermittent live preview, interrupt/skip
-- Locally stored results, thumbnails, image export to Android Pictures
+- Current generation results shown temporarily in memory only (replaced on the next generation); no automatic image files stored on phone
+- PC-only gallery with in-memory thumbnails; originals downloaded to Android Pictures only by explicit user action
 - Last-used generation settings saved locally
 - Optional PC bridge: restore PC generation parameters by mode from `params.txt` or mode-specific output metadata; browse the 80 most recent images from PC output directories and download originals into the Android photo gallery
+
+## Storage policy (v0.10.4)
+
+Generated images are shown only for the **current generation** in app memory.
+Beginning another generation replaces them. Closing the app may discard these
+temporary results; the PC remains the source of truth. No image is written
+automatically to Android app storage. The gallery contains only PC output images;
+its thumbnails are held in RAM, not downloaded as original image files.
+**Original herunterladen** is the only operation that saves a PC image to
+`Pictures/A1111 Remote` on the phone. On upgrade, old automatically saved
+`a1111_*.png` files from the app's private `files/images` directory are
+deleted, without touching user-exported images in Android Pictures or
+connection settings.
 
 ## Optional PC Control (v0.5)
 
@@ -166,7 +180,7 @@ AUTOMATIC1111 extension which uses the existing WebUI port, not a second server.
    `webui-user.bat` launch flags; keep your existing flags and port.
 3. Restart AUTOMATIC1111. The log should say
    `[A1111 Remote] PC history bridge active`.
-4. In Android, tap **Verbindung testen** again. Then **PC** inside Galerie shows
+4. In Android, tap **Verbindung testen** again. Then **Galerie** shows
    PC images. Tap an image and **Original herunterladen** to save a copy to the
    phone in `Pictures/A1111 Remote`. The PC originals stay untouched.
 5. In Generate, **Letzte PC-Parameter übernehmen** reads the WebUI's most
