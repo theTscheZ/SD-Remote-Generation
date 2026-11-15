@@ -7,7 +7,7 @@ Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted
 ## Included in v0.1
 
 - LAN and Tailscale endpoint configuration with connection check and fallback
-- PC control: Wi-Fi Wake-on-LAN, authenticated Windows helper to start and stop A1111, and 30-second cancellable Windows shutdown (optional setup)
+- PC control: authenticated Windows helper for sleep (with wake events enabled), 30-second cancellable shutdown, and A1111 start/stop; Wake-on-LAN from the home Wi-Fi to resume from sleep, with automatic reconnection (optional setup, full power-on deferred)
 - Optional HTTP Basic API authentication (password encrypted using Android Keystore)
 - `txt2img`: positive/negative prompts, steps, CFG, width, height, Batch Count (n_iter), Batch Size, seed, sampler, scheduler, checkpoint
 - Search all LoRAs from the PC using `/sdapi/v1/loras`; tap to add a LoRA tag to the prompt, tap again to remove it
