@@ -12,7 +12,7 @@ Native Android client (Kotlin + Jetpack Compose) for controlling a **self-hosted
 - `txt2img`: positive/negative prompts, steps, CFG, width, height, Batch Count (n_iter), Batch Size, seed, sampler, scheduler, checkpoint
 - Search all LoRAs from the PC using `/sdapi/v1/loras`; tap to add a LoRA tag to the prompt, tap again to remove it
 - txt2img, img2img (with image selection and denoising), and Extras (upscaling and restoration) workflows
-- Hires. Fix scale and denoising
+- Hires. Fix scale, denoising and independent **Hires. Steps** (0 reuses normal Steps), including PC infotext restoration when available
 - ADetailer: independently toggleable Face and Hand tabs, plus optional additional tabs; detector, prompts, confidence, denoising, mask blur, padding, mask erosion/dilation
 - Global Generate/Interrupt button and progress bar in toolbar across all tabs
 - Batch Count (n_iter) and Batch Size (batch_size) separately, with total image count
