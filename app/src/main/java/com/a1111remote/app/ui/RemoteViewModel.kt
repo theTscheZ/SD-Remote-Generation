@@ -189,6 +189,12 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 // A sleeping PC cannot run Tailscale or answer HTTP requests.
                 // Probe the controller after the magic packet and reconnect
                 // when it has genuinely returned. Never claim wake before reply.
+                if (state.pcControllerToken.length < 32) {
+                    state = state.copy(pcControlMessage =
+                        "Wake-on-LAN gesendet. Zum automatischen Wiederverbinden " +
+                        "den Controller-Token eintragen.")
+                    return@launch
+                }
                 viewModelScope.launch {
                     repeat(12) {
                         delay(5000)
