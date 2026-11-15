@@ -33,7 +33,7 @@ class PcControlClient {
 
     companion object {
         private const val CONTROL_PORT = 42001
-        private val VALID_ACTIONS = setOf("start", "stop", "shutdown", "shutdown/cancel")
+        private val VALID_ACTIONS = setOf("start", "stop", "sleep", "shutdown", "shutdown/cancel")
 
         fun controllerUrl(a1111Url: String): String {
             val clean = A1111Api.normalizePrivateUrl(a1111Url)
@@ -63,9 +63,14 @@ class PcControlClient {
         }
     }
 
-    private fun addresses(connection: ConnectionSettings): List<String> =
-        listOf(connection.lanUrl, connection.vpnUrl)
-            .filter { it.isNotBlank() }.distinct().map(::controllerUrl)
+    private fun addresses(connection: ConnectionSettings): List<String> {
+        val ordered = when (connection.connectionMode) {
+            "lan" -> listOf(connection.lanUrl)
+            "tailscale" -> listOf(connection.vpnUrl)
+            else -> listOf(connection.lanUrl, connection.vpnUrl)
+        }
+        return ordered.filter { it.isNotBlank() }.distinct().map(::controllerUrl)
+    }
 
     private fun request(url: String, token: String, path: String, post: Boolean): JSONObject {
         require(token.length >= 32) { "Steuerungs-Token fehlt oder ist zu kurz." }
