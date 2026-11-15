@@ -800,7 +800,7 @@ private fun PcControlScreen(state: UiState, vm: RemoteViewModel) {
                 enabled = !busy && state.pcMac.isNotBlank()) {
                 Icon(Icons.Default.PowerSettingsNew, null)
                 Spacer(Modifier.width(8.dp))
-                Text("PC aufwecken (Wake-on-LAN)")
+                Text("Energiesparmodus beenden (WoL)")
             }
             Button(onClick = { vm.pcAction("start") }, modifier = Modifier.fillMaxWidth(),
                 enabled = !busy && state.pcControllerToken.length >= 32 &&
@@ -821,7 +821,7 @@ private fun PcControlScreen(state: UiState, vm: RemoteViewModel) {
                     modifier = Modifier.weight(1f),
                     enabled = !busy && status != null &&
                         !state.isGenerating && !state.remoteGenerating) {
-                    Text("Energiesparmodus")
+                    Text("Energiesparmodus aktivieren")
                 }
                 OutlinedButton(onClick = { confirmShutdown = true },
                     modifier = Modifier.weight(1f),
@@ -852,7 +852,7 @@ private fun PcControlScreen(state: UiState, vm: RemoteViewModel) {
                 TextButton(onClick = {
                     confirmSleep = false
                     vm.pcAction("sleep")
-                }) { Text("Energiesparmodus") }
+                }) { Text("Standby aktivieren") }
             },
             dismissButton = {
                 TextButton(onClick = { confirmSleep = false }) { Text("Abbrechen") }
