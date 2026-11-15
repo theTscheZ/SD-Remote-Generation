@@ -1,8 +1,9 @@
 # A1111 Remote — PC Power Control (Windows)
 
 This optional helper allows the Android app to start/stop an A1111 session and
-schedule Windows shutdown. It works **before A1111 launches**, unlike an A1111
-extension. Wake-on-LAN is sent separately by the phone.
+request normal Windows sleep and schedule Windows shutdown. It works **before
+A1111 launches**, unlike an A1111 extension. Wake-on-LAN is sent separately
+by the phone to wake the sleeping PC.
 
 ## Install on the Windows PC
 
@@ -53,16 +54,19 @@ Use Tailscale for remote connections, **not** internet port forwarding.
   Usually the PC must remain connected via **wired Ethernet**.
 - In Windows Device Manager → network adapter → Properties, enable
   Wake on Magic Packet, and allow the adapter to wake the machine.
-  Some PCs require disabling Windows Fast Startup for reliable WoL shutdown wake.
+  For this version, only wake from **sleep** is targeted; powering on from a
+  complete shutdown is intentionally postponed.
 - Get the **Ethernet physical address** with `ipconfig /all` (do not use the
   Wi-Fi adapter or Tailscale's virtual MAC).
 - Connect the phone to the *same home Wi-Fi* as the PC's Ethernet network.
   The Android app sends a magic packet over its Wi-Fi network on UDP port 9.
   Depending on your router and BIOS, powering on from a full shutdown
   may not be supported; sleep wake can work when shutdown wake does not.
-- WoL does **not** automatically work outside your home network. Tailscale
-  cannot wake the PC by itself while the PC is off. Remote wake needs an
-  always-on home device/router capable of relaying the magic packet.
+- WoL does **not** automatically work outside your home network. The sleeping
+  PC cannot relay its own magic packet through Tailscale. Remote wake from
+  outside requires an always-on LAN relay/router; this is not implemented.
+- After sending the wake packet, Android checks the controller and reconnects
+  when it becomes reachable. The packet alone cannot confirm wake success.
 
 ## What the controller does
 
@@ -71,6 +75,10 @@ Use Tailscale for remote connections, **not** internet port forwarding.
 - `POST /v1/stop` stops only an A1111 process tree launched by this helper.
   It cannot stop a WebUI that you launched manually, or one started before
   the helper was restarted.
+- `POST /v1/sleep` requests normal Windows standby after a short response
+  delay, without disabling wake events. Windows user permissions may be
+  needed; failures are printed in the controller console. Explicit sleep
+  remains possible even with the A1111 idle-sleep prevention running.
 - `POST /v1/shutdown` schedules a Windows shutdown in 30 seconds.
 - `POST /v1/shutdown/cancel` attempts to cancel pending shutdown.
 
@@ -80,6 +88,11 @@ or remote configuration API. If the helper restarts, an already running A1111
 process will not be "managed" until it is restarted by the helper.
 
 ## Troubleshooting
+
+- Configure and test Wake-on-LAN **before** using sleep: otherwise the
+  physical power button may be needed to wake the PC.
+- The app blocks sleep while it knows a generation is running; save all
+  unsaved Windows work regardless.
 
 If Android says **PC-Steuerung nicht erreichbar**:
 
