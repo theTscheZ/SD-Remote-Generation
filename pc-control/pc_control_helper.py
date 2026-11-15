@@ -213,13 +213,39 @@ class Controller:
         return {"message": "Windows shutdown cancelled."}
 
 
-def serve():
+def _exit_with_parent(parent_pid):
+    """Exit helper when the WebUI process that launched it terminates."""
+    if sys.platform != "win32" or parent_pid is None:
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    SYNCHRONIZE = 0x00100000
+    handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, parent_pid)
+    if not handle:
+        print("[A1111 Remote] Parent already exited; stopping helper.", flush=True)
+        os._exit(0)
+
+    def wait_for_parent():
+        try:
+            ctypes.windll.kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+        print("[A1111 Remote] A1111 exited; stopping PC helper.", flush=True)
+        os._exit(0)
+
+    threading.Thread(target=wait_for_parent, daemon=True,
+                     name="a1111-parent-monitor").start()
+
+
+def serve(parent_pid=None):
     if sys.platform != "win32":
         raise SystemExit("This helper runs on Windows only.")
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     if len(config.get("token", "")) < 32:
         raise SystemExit("Missing/weak token. Run setup again.")
     controller = Controller(config)
+    _exit_with_parent(parent_pid)
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -287,8 +313,10 @@ def serve():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("setup", "serve"))
+    parser.add_argument("--parent-pid", type=int, default=None,
+                        help="Exit automatically when this A1111 process exits.")
     args = parser.parse_args()
     if args.command == "setup":
         setup()
     else:
-        serve()
+        serve(args.parent_pid)
