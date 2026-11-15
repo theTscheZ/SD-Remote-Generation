@@ -31,6 +31,17 @@ class ModelsTest {
         assertEquals("face_yolov8n.pt", args.getJSONObject(2).getString("ad_model"))
     }
 
+    @Test fun `Hires second pass steps use the correct API key and persist`() {
+        val custom = GenerationSettings(hiresEnabled = true, steps = 30, hiresSteps = 12)
+        assertEquals(30, custom.toPayload().getInt("steps"))
+        assertEquals(12, custom.toPayload().getInt("hr_second_pass_steps"))
+        assertEquals(custom, GenerationSettings.fromJson(custom.toJson()))
+        val reuse = GenerationSettings(hiresEnabled = true)
+        assertEquals(0, reuse.toPayload().getInt("hr_second_pass_steps"))
+        assertEquals(0, GenerationSettings.fromJson(org.json.JSONObject()).hiresSteps)
+        assertFalse(GenerationSettings().toPayload().has("hr_second_pass_steps"))
+    }
+
     @Test fun `roundtrip settings`() {
         val start = GenerationSettings(width=832, adetailer=AdetailerSettings(enabled=true, confidence=0.55f))
         assertEquals(start, GenerationSettings.fromJson(start.toJson()))
