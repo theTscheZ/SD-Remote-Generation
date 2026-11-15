@@ -744,6 +744,7 @@ private fun GalleryScreen(state: UiState, vm: RemoteViewModel) {
 @Composable
 private fun PcControlScreen(state: UiState, vm: RemoteViewModel) {
     var confirmShutdown by remember { mutableStateOf(false) }
+    var confirmSleep by remember { mutableStateOf(false) }
     val status = state.pcControllerStatus
     val busy = state.pcControlBusy
     Column(
@@ -752,8 +753,8 @@ private fun PcControlScreen(state: UiState, vm: RemoteViewModel) {
     ) {
         Text("PC-Steuerung", style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold)
-        Text("Zum Einschalten im Heim-WLAN: Wake-on-LAN. Für Start/Stopp/Shutdown: " +
-            "Windows-Helfer auf Port 42001. Tailscale ist für diese Befehle optional.",
+        Text("Energiesparmodus und Herunterfahren über Windows-Helfer (Port 42001). " +
+            "Aufwecken mit Wake-on-LAN nur im Heim-WLAN; vollständiges Einschalten ist vorerst nicht vorgesehen.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.secondary)
         SectionCard("Einrichten") {
@@ -799,7 +800,7 @@ private fun PcControlScreen(state: UiState, vm: RemoteViewModel) {
                 enabled = !busy && state.pcMac.isNotBlank()) {
                 Icon(Icons.Default.PowerSettingsNew, null)
                 Spacer(Modifier.width(8.dp))
-                Text("PC einschalten (Wake-on-LAN)")
+                Text("PC aufwecken (Wake-on-LAN)")
             }
             Button(onClick = { vm.pcAction("start") }, modifier = Modifier.fillMaxWidth(),
                 enabled = !busy && state.pcControllerToken.length >= 32 &&
@@ -815,10 +816,18 @@ private fun PcControlScreen(state: UiState, vm: RemoteViewModel) {
                     "nicht über diesen Button gestoppt werden.",
                     style = MaterialTheme.typography.bodySmall)
             }
-            OutlinedButton(onClick = { confirmShutdown = true },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !busy && status != null) {
-                Text("PC herunterfahren")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = { confirmSleep = true },
+                    modifier = Modifier.weight(1f),
+                    enabled = !busy && status != null &&
+                        !state.isGenerating && !state.remoteGenerating) {
+                    Text("Energiesparmodus")
+                }
+                OutlinedButton(onClick = { confirmShutdown = true },
+                    modifier = Modifier.weight(1f),
+                    enabled = !busy && status != null) {
+                    Text("Herunterfahren")
+                }
             }
             if (status?.shutdownPending == true) {
                 TextButton(onClick = { vm.pcAction("shutdown/cancel") }) {
@@ -830,6 +839,25 @@ private fun PcControlScreen(state: UiState, vm: RemoteViewModel) {
             "den Windows-Helfer installieren. Keine Ports im Router freigeben.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.secondary)
+    }
+    if (confirmSleep) {
+        AlertDialog(
+            onDismissRequest = { confirmSleep = false },
+            title = { Text("PC in Energiesparmodus versetzen?") },
+            text = { Text("Windows wird in den normalen Standby versetzt. " +
+                "Laufende Arbeit kann unterbrochen werden. Zum Aufwecken muss " +
+                "Wake-on-LAN im BIOS und für den Ethernet-Adapter aktiviert sein. " +
+                "Das Handy muss sich im selben Heim-WLAN befinden.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmSleep = false
+                    vm.pcAction("sleep")
+                }) { Text("Energiesparmodus") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmSleep = false }) { Text("Abbrechen") }
+            }
+        )
     }
     if (confirmShutdown) {
         AlertDialog(
