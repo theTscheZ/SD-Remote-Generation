@@ -402,6 +402,12 @@ private fun OrderedGenerationSections(state: UiState, vm: RemoteViewModel) {
                             NumberInput("Upscale", current.hiresScale.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { n -> vm.editSettings { s -> s.copy(hiresScale = n) } } }
                             NumberInput("Denoising", current.hiresDenoising.toString(), Modifier.weight(1f), KeyboardType.Decimal) { it.toFloatOrNull()?.let { n -> vm.editSettings { s -> s.copy(hiresDenoising = n) } } }
                         }
+                        NumberInput("Hires. Steps (0 = normale Steps)", current.hiresSteps.toString(),
+                            Modifier.fillMaxWidth(), KeyboardType.Number) { input ->
+                            input.toIntOrNull()?.let { steps ->
+                                vm.editSettings { it.copy(hiresSteps = steps.coerceIn(0, 150)) }
+                            }
+                        }
                     }
                 }
             }
