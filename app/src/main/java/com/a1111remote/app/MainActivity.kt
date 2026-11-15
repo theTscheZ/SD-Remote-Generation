@@ -63,7 +63,6 @@ import com.a1111remote.app.model.AdetailerSettings
 import com.a1111remote.app.model.GenerationSettings
 import com.a1111remote.app.model.GenerationMode
 import com.a1111remote.app.data.PcImage
-import com.a1111remote.app.ui.LocalImage
 import com.a1111remote.app.ui.RemoteViewModel
 import com.a1111remote.app.ui.UiState
 
@@ -169,7 +168,7 @@ private fun RemoteApp(vm: RemoteViewModel) {
         bottomBar = {
             if (!keyboardVisible) NavigationBar {
                 NavigationBarItem(selected = screen == Screen.GENERATE, onClick = { screen = Screen.GENERATE }, icon = { Icon(Icons.Default.Tune, null) }, label = { Text("Generate") })
-                NavigationBarItem(selected = screen == Screen.GALLERY, onClick = { vm.refreshGallery(); vm.refreshPcGallery(); screen = Screen.GALLERY }, icon = { Icon(Icons.Default.Image, null) }, label = { Text("Galerie") })
+                NavigationBarItem(selected = screen == Screen.GALLERY, onClick = { vm.refreshPcGallery(); screen = Screen.GALLERY }, icon = { Icon(Icons.Default.Image, null) }, label = { Text("Galerie") })
                 NavigationBarItem(selected = screen == Screen.CONTROL,
                     onClick = { screen = Screen.CONTROL; vm.refreshPcControl() },
                     icon = { Icon(Icons.Default.Computer, null) }, label = { Text("PC") })
@@ -660,43 +659,15 @@ private fun LoraPicker(state: UiState, vm: RemoteViewModel) {
 
 @Composable
 private fun GalleryScreen(state: UiState, vm: RemoteViewModel) {
-    var showPc by remember { mutableStateOf(false) }
-    var selectedLocal by remember { mutableStateOf<LocalImage?>(null) }
     var selectedPc by remember { mutableStateOf<PcImage?>(null) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            FilterChip(selected = !showPc, onClick = { showPc = false },
-                label = { Text("Handy") })
-            FilterChip(selected = showPc, onClick = { showPc = true; vm.refreshPcGallery() },
-                label = { Text("PC") })
-            if (showPc && state.bridgeAvailable) {
+            horizontalArrangement = Arrangement.End) {
+            if (state.bridgeAvailable) {
                 TextButton(onClick = vm::refreshPcGallery) { Text("Aktualisieren") }
             }
         }
-        if (!showPc) {
-            if (state.gallery.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Noch keine lokal gespeicherten Bilder.",
-                        color = MaterialTheme.colorScheme.secondary)
-                }
-            } else {
-                LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(state.gallery, key = { it.file.absolutePath }) { item ->
-                        Card(Modifier.fillMaxWidth().clickable { selectedLocal = item }) {
-                            Image(item.preview.asImageBitmap(), "Generiertes Bild",
-                                Modifier.fillMaxWidth().height(190.dp), contentScale = ContentScale.Crop)
-                            Text(item.label, Modifier.padding(8.dp),
-                                style = MaterialTheme.typography.labelSmall, maxLines = 1,
-                                overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-            }
-        } else if (!state.bridgeAvailable) {
+        if (!state.bridgeAvailable) {
             Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                 Text("Für die PC-Galerie muss die A1111 Remote-Erweiterung installiert sein. " +
                     "Danach WebUI neu starten und die App erneut verbinden.",
@@ -733,24 +704,6 @@ private fun GalleryScreen(state: UiState, vm: RemoteViewModel) {
             }
         }
     }
-    selectedLocal?.let { item ->
-        AlertDialog(onDismissRequest = { selectedLocal = null }, title = { Text("Handy-Bild") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Image(item.preview.asImageBitmap(), "Vorschau",
-                        Modifier.fillMaxWidth().heightIn(max = 440.dp), contentScale = ContentScale.Fit)
-                    Text(item.label, style = MaterialTheme.typography.bodySmall)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { vm.exportImage(item); selectedLocal = null }) {
-                    Icon(Icons.Default.Download, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("In Bilder speichern")
-                }
-            },
-            dismissButton = { TextButton(onClick = { selectedLocal = null }) { Text("Schließen") } })
-    }
     selectedPc?.let { item ->
         AlertDialog(onDismissRequest = { selectedPc = null }, title = { Text("PC-Bild") },
             text = {
@@ -760,7 +713,7 @@ private fun GalleryScreen(state: UiState, vm: RemoteViewModel) {
                             Modifier.fillMaxWidth().heightIn(max = 440.dp), contentScale = ContentScale.Fit)
                     }
                     Text(item.name, style = MaterialTheme.typography.bodySmall)
-                    Text("Das Original bleibt auf dem PC, bis du es herunterlädst.",
+                    Text("Das Original befindet sich auf dem PC. Nur mit „Original herunterladen“ wird es auf dem Handy gespeichert.",
                         style = MaterialTheme.typography.bodySmall)
                 }
             },
