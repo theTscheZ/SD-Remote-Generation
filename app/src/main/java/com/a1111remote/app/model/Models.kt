@@ -97,6 +97,7 @@ data class GenerationSettings(
     val batchCount: Int = 1,
     val hiresEnabled: Boolean = false,
     val hiresScale: Float = 1.5f,
+    val hiresSteps: Int = 0,
     val hiresDenoising: Float = 0.4f,
     val adetailer: AdetailerSettings = AdetailerSettings(),
     val additionalAdetailers: List<AdetailerSettings> = listOf(AdetailerSettings(model = "hand_yolov8n.pt")),
@@ -120,6 +121,7 @@ data class GenerationSettings(
             .put("enable_hr", hiresEnabled)
         if (hiresEnabled) {
             o.put("hr_scale", hiresScale.coerceIn(1f, 4f).toDouble())
+            o.put("hr_second_pass_steps", hiresSteps.coerceIn(0, 150))
             o.put("denoising_strength", hiresDenoising.coerceIn(0f, 1f).toDouble())
         }
         if (checkpoint.isNotBlank()) {
@@ -150,6 +152,7 @@ data class GenerationSettings(
         .put("batchCount", batchCount)
         .put("hiresEnabled", hiresEnabled)
         .put("hiresScale", hiresScale.toDouble())
+        .put("hiresSteps", hiresSteps)
         .put("hiresDenoising", hiresDenoising.toDouble())
         .put("img2imgDenoising", img2imgDenoising.toDouble())
         .put("additionalAdetailers", JSONArray().apply { additionalAdetailers.forEach { put(it.toStoredJson()) } })
@@ -177,6 +180,7 @@ data class GenerationSettings(
                 batchCount = json.optInt("batchCount", 1),
                 hiresEnabled = json.optBoolean("hiresEnabled", false),
                 hiresScale = json.optDouble("hiresScale", 1.5).toFloat(),
+                hiresSteps = json.optInt("hiresSteps", 0),
                 hiresDenoising = json.optDouble("hiresDenoising", 0.4).toFloat(),
                 img2imgDenoising = json.optDouble("img2imgDenoising", 0.7).toFloat(),
                 additionalAdetailers = additional,
