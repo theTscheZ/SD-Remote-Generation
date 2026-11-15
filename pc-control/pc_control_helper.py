@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A1111 Remote PC Controller — Windows-only, standard library, no arbitrary commands.
 
-The API has four fixed actions. Keep the Windows firewall limited to your LAN /
+The API exposes only explicit, token-authenticated power and WebUI actions. Keep the Windows firewall limited to your LAN /
 Tailscale interface and never forward this port on your router.
 """
 import argparse
@@ -103,6 +103,102 @@ class Controller:
             self.child = None
             return {"message": "Helper-managed A1111 process stopped."}
 
+    def sleep(self):
+        """Schedule normal Windows sleep after acknowledging the HTTP request.
+
+        Wake events stay ENABLED, so Ethernet Wake-on-LAN can resume the PC.
+        A short delay lets the Android client receive the acknowledgement.
+        """
+        with self.lock:
+            if self.shutdown_pending:
+                raise ValueError("Cancel the pending shutdown before sleeping.")
+
+            def suspend_after_ack():
+                time.sleep(1.5)
+                try:
+                    import ctypes
+                    from ctypes import wintypes
+
+                    # SetSuspendState requires SeShutdownPrivilege enabled in
+                    # the process token. Standard signed-in users normally have
+                    # this privilege available, but it is initially disabled.
+                    TOKEN_ADJUST_PRIVILEGES = 0x0020
+                    TOKEN_QUERY = 0x0008
+                    SE_PRIVILEGE_ENABLED = 0x00000002
+
+                    class LUID(ctypes.Structure):
+                        _fields_ = [("LowPart", wintypes.DWORD),
+                                    ("HighPart", wintypes.LONG)]
+
+                    class LUID_AND_ATTRIBUTES(ctypes.Structure):
+                        _fields_ = [("Luid", LUID),
+                                    ("Attributes", wintypes.DWORD)]
+
+                    class TOKEN_PRIVILEGES(ctypes.Structure):
+                        _fields_ = [("PrivilegeCount", wintypes.DWORD),
+                                    ("Privileges", LUID_AND_ATTRIBUTES * 1)]
+
+                    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+                    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                    powrprof = ctypes.WinDLL("powrprof", use_last_error=True)
+                    token = wintypes.HANDLE()
+                    advapi32.OpenProcessToken.argtypes = [
+                        wintypes.HANDLE, wintypes.DWORD,
+                        ctypes.POINTER(wintypes.HANDLE)]
+                    advapi32.OpenProcessToken.restype = wintypes.BOOL
+                    advapi32.LookupPrivilegeValueW.argtypes = [
+                        wintypes.LPCWSTR, wintypes.LPCWSTR,
+                        ctypes.POINTER(LUID)]
+                    advapi32.LookupPrivilegeValueW.restype = wintypes.BOOL
+                    advapi32.AdjustTokenPrivileges.argtypes = [
+                        wintypes.HANDLE, wintypes.BOOL,
+                        ctypes.POINTER(TOKEN_PRIVILEGES), wintypes.DWORD,
+                        ctypes.c_void_p, ctypes.c_void_p]
+                    advapi32.AdjustTokenPrivileges.restype = wintypes.BOOL
+                    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+                    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+                    powrprof.SetSuspendState.argtypes = [
+                        ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_ubyte]
+                    powrprof.SetSuspendState.restype = ctypes.c_ubyte
+
+                    if not advapi32.OpenProcessToken(
+                        kernel32.GetCurrentProcess(),
+                        TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+                        ctypes.byref(token)
+                    ):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    try:
+                        privileges = TOKEN_PRIVILEGES()
+                        privileges.PrivilegeCount = 1
+                        if not advapi32.LookupPrivilegeValueW(
+                            None, "SeShutdownPrivilege",
+                            ctypes.byref(privileges.Privileges[0].Luid)
+                        ):
+                            raise ctypes.WinError(ctypes.get_last_error())
+                        privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED
+                        if not advapi32.AdjustTokenPrivileges(
+                            token, False, ctypes.byref(privileges),
+                            0, None, None
+                        ):
+                            raise ctypes.WinError(ctypes.get_last_error())
+                        if ctypes.get_last_error() == 1300:
+                            raise PermissionError(
+                                "SeShutdownPrivilege unavailable for controller user")
+                        # Hibernate=False, force=False, disable wake events=False.
+                        if not powrprof.SetSuspendState(0, 0, 0):
+                            raise ctypes.WinError(ctypes.get_last_error())
+                    finally:
+                        kernel32.CloseHandle(token)
+                except Exception as error:
+                    print("[A1111 Remote] Windows sleep FAILED:", error, flush=True)
+
+            threading.Thread(
+                target=suspend_after_ack,
+                name="a1111-remote-sleep",
+                daemon=True
+            ).start()
+            return {"message": "Windows sleep requested. Wake events remain enabled."}
+
     def shutdown(self):
         if self.shutdown_pending:
             raise ValueError("Shutdown is already scheduled.")
@@ -164,6 +260,7 @@ def serve():
                 self.respond(400, {"error": "No request body accepted."})
                 return
             actions = {"/v1/start": controller.start, "/v1/stop": controller.stop,
+                       "/v1/sleep": controller.sleep,
                        "/v1/shutdown": controller.shutdown,
                        "/v1/shutdown/cancel": controller.cancel_shutdown}
             action = actions.get(self.path)
