@@ -40,8 +40,7 @@ jobs:
         run: |
           printf '%s' "$SIGNING_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/a1111-remote.p12"
           chmod 600 "$RUNNER_TEMP/a1111-remote.p12"
-      - name: Build updateable release APK
-        if: ${{ env.SIGNING_P12_BASE64 != '' && env.SIGNING_PASSWORD != '' }}
+      - name: Build optimized release APK
         env:
           A1111_SIGNING_P12_PATH: ${{ runner.temp }}/a1111-remote.p12
           A1111_SIGNING_PASSWORD: ${{ secrets.A1111_SIGNING_PASSWORD }}
@@ -54,11 +53,11 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
-      - name: Upload temporary debug APK (not updateable)
+      - name: Upload optimized unsigned release (for local stable-key signing)
         if: ${{ env.SIGNING_P12_BASE64 == '' || env.SIGNING_PASSWORD == '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: A1111Remote-TEMPORARY-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: A1111Remote-OPTIMIZED-unsigned-release
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
           retention-days: 14
