@@ -12,8 +12,8 @@ android {
         applicationId = "com.a1111remote.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 13
-        versionName = "0.10.3"
+        versionCode = 14
+        versionName = "0.10.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
