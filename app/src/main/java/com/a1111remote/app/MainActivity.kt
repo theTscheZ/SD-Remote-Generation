@@ -816,18 +816,16 @@ private fun PcControlScreen(state: UiState, vm: RemoteViewModel) {
                     "nicht über diesen Button gestoppt werden.",
                     style = MaterialTheme.typography.bodySmall)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { confirmSleep = true },
-                    modifier = Modifier.weight(1f),
-                    enabled = !busy && status != null &&
-                        !state.isGenerating && !state.remoteGenerating) {
-                    Text("Energiesparmodus aktivieren")
-                }
-                OutlinedButton(onClick = { confirmShutdown = true },
-                    modifier = Modifier.weight(1f),
-                    enabled = !busy && status != null) {
-                    Text("Herunterfahren")
-                }
+            OutlinedButton(onClick = { confirmSleep = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !busy && status != null &&
+                    !state.isGenerating && !state.remoteGenerating) {
+                Text("Energiesparmodus aktivieren")
+            }
+            OutlinedButton(onClick = { confirmShutdown = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !busy && status != null) {
+                Text("PC herunterfahren")
             }
             if (status?.shutdownPending == true) {
                 TextButton(onClick = { vm.pcAction("shutdown/cancel") }) {
